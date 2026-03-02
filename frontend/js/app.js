@@ -642,9 +642,11 @@ export class App {
             if (sol.changes && sol.changes.length > 0) {
                 const changesDiv = document.createElement('div');
                 changesDiv.className = 'solution-changes';
-                changesDiv.innerHTML = sol.changes.map(c => 
-                    `${this.i18n.t('position')}${c.position}: ${c.from} → ${c.to} (${c.operation})`
-                ).join('<br>');
+                changesDiv.innerHTML = sol.changes.map(c => {
+                    const opKey = `op_${c.operation}`;
+                    const opText = this.i18n.t(opKey) || c.operation;
+                    return `${this.i18n.t('position')}${c.position}: ${c.from} → ${c.to} (${opText})`;
+                }).join('<br>');
                 card.appendChild(changesDiv);
             }
             

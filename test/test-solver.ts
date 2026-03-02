@@ -1,6 +1,24 @@
 /**
- * 测试求解器 - 使用test.js中的所有案例
+ * 测试求解器 - 使用cases.json中的测试案例
  */
+
+import casesData from './cases.json';
+
+interface TestCase {
+  equation: string;
+  expectedSolutions: number;
+  description?: string;
+  maxMutations?: number;
+}
+
+interface TestCases {
+  standardMode1Match: TestCase[];
+  handwrittenMode1Match: TestCase[];
+  standardMode2Match: TestCase[];
+  handwrittenMode2Match: TestCase[];
+}
+
+const cases: TestCases = casesData as TestCases;
 
 interface TestResult {
   equation: string;
@@ -65,7 +83,8 @@ async function getCacheStats(): Promise<any> {
 async function solveEquation(
   equation: string, 
   mode: 'standard' | 'handwritten' = 'standard',
-  moveCount: 1 | 2 = 1
+  moveCount: 1 | 2 = 1,
+  maxMutations = 10000
 ): Promise<any> {
   try {
     const response = await fetch(`${API_BASE}/api/solve`, {
@@ -77,7 +96,8 @@ async function solveEquation(
         equation,
         mode,
         moveCount,
-        maxSolutions: 100
+        maxSolutions: 100,
+        maxMutations
       }),
     });
     
@@ -96,26 +116,30 @@ async function solveEquation(
  * 运行单个测试
  */
 async function runTest(
-  equation: string,
-  expectedSolutions: number,
+  testCase: TestCase,
   mode: 'standard' | 'handwritten' = 'standard',
   moveCount: 1 | 2 = 1
 ): Promise<TestResult> {
   try {
-    const result = await solveEquation(equation, mode, moveCount);
+    const result = await solveEquation(
+      testCase.equation, 
+      mode, 
+      moveCount, 
+      testCase.maxMutations || 10000
+    );
     const actualCount = result.solutions?.length || 0;
     
     return {
-      equation,
-      expected: expectedSolutions,
+      equation: testCase.equation,
+      expected: testCase.expectedSolutions,
       actual: actualCount,
-      success: actualCount >= expectedSolutions, // 至少达到期望数量
+      success: actualCount >= testCase.expectedSolutions, // 至少达到期望数量
       solutions: result.solutions?.map((s: any) => s.equation) || []
     };
   } catch (error: any) {
     return {
-      equation,
-      expected: expectedSolutions,
+      equation: testCase.equation,
+      expected: testCase.expectedSolutions,
       actual: 0,
       success: false,
       error: error.message
@@ -158,17 +182,8 @@ async function main() {
   console.log('📋 标准模式测试（移动1根）');
   console.log('═══════════════════════════════════\n');
   
-  const standardTests: [string, number][] = [
-    ['8+3-4=0', 2],   // 三数运算（+、-）
-    ['6-5=17', 1],    // 减法
-    ['5+7=2', 2],     // 加法
-    ['6+4=4', 2],     // 加法
-    ['9/3=2', 2],     // 除法（9/3=3可变为6/3=2）
-    ['3*3=6', 3],     // 乘法（3*3=9可变为2*3=6或 3*2=6）
-  ];
-  
-  for (const [equation, expected] of standardTests) {
-    const result = await runTest(equation, expected, 'standard', 1);
+  for (const testCase of cases.standardMode1Match) {
+    const result = await runTest(testCase, 'standard', 1);
     
     if (result.success) {
       totalPassed++;
@@ -197,18 +212,8 @@ async function main() {
   console.log('✍️  手写模式测试（移动1根）');
   console.log('═══════════════════════════════════\n');
   
-  const handwrittenTests: [string, number][] = [
-    ['(0)H+(6)H=(9)H', 3],
-    ['2+(4)H=5', 1],
-    ['(1)H+2=5', 2],
-    ['(4)H+5=(9)H', 1],
-    ['2*3=(9)H', 2],
-    ['6/3=3', 2],
-    ['(9)H+3-2=5', 1],
-  ];
-  
-  for (const [equation, expected] of handwrittenTests) {
-    const result = await runTest(equation, expected, 'handwritten', 1);
+  for (const testCase of cases.handwrittenMode1Match) {
+    const result = await runTest(testCase, 'handwritten', 1);
     
     if (result.success) {
       totalPassed++;
@@ -236,23 +241,8 @@ async function main() {
   console.log('🔥 标准模式测试（移动2根）');
   console.log('═══════════════════════════════════\n');
   
-  const doubleMoveTests: [string, number][] = [
-    ['1+3=5', 3],
-    ['5+2=8', 3],
-    ['3-2=0', 3],
-    ['6-4=3', 1],
-    ['8-6=1', 4],
-    ['5+5=8', 7],
-    ['111+1=0', 4],
-    ['64+98=11', 1],
-    ['41+29=78', 6],
-    ['79-39=17', 7],
-    ['94-35=48', 1],
-    ['1+7=8+8', 1],
-  ];
-  
-  for (const [equation, expected] of doubleMoveTests) {
-    const result = await runTest(equation, expected, 'standard', 2);
+  for (const testCase of cases.standardMode2Match) {
+    const result = await runTest(testCase, 'standard', 2);
     
     if (result.success) {
       totalPassed++;
@@ -280,18 +270,8 @@ async function main() {
   console.log('🔥 手写模式测试（移动2根）');
   console.log('═══════════════════════════════════\n');
   
-  const handwrittenDoubleMoveTests: [string, number][] = [
-    ['(1)H(1)H(1)H+(1)H=(0)H', 5],
-    ['2+3=8', 4],
-    ['(1)H+2=5', 2],
-    ['(9)H+2=8', 1],
-    ['5+(7)H=8', 1],
-    ['2*3=5', 2],
-    ['2*3=(6)H', 3],
-  ];
-  
-  for (const [equation, expected] of handwrittenDoubleMoveTests) {
-    const result = await runTest(equation, expected, 'handwritten', 2);
+  for (const testCase of cases.handwrittenMode2Match) {
+    const result = await runTest(testCase, 'handwritten', 2);
     
     if (result.success) {
       totalPassed++;
@@ -315,8 +295,8 @@ async function main() {
   }
   
   // ========== 总结 ==========
-  const totalTests = standardTests.length + handwrittenTests.length + 
-                     doubleMoveTests.length + handwrittenDoubleMoveTests.length;
+  const totalTests = cases.standardMode1Match.length + cases.handwrittenMode1Match.length + 
+                     cases.standardMode2Match.length + cases.handwrittenMode2Match.length;
   
   const totalTime = performance.now() - startTime;
   

@@ -72,6 +72,16 @@ export class I18n {
                 filterSignsTooltip: '过滤带正负号的解',
                 position: '位置',
                 
+                // 操作类型翻译
+                op_MOVE_1: '移1根',
+                op_MOVE_2: '移2根',
+                op_REMOVE_1: '去1根',
+                op_REMOVE_2: '去2根',
+                op_ADD_1: '加1根',
+                op_ADD_2: '加2根',
+                op_MOVE_SUB: '移去1根',
+                op_MOVE_ADD: '移加1根',
+                
                 // 页脚
                 madeWith: '由 FalkorDB 驱动 |',
                 github: 'GitHub'
@@ -140,6 +150,16 @@ export class I18n {
                 filterSigns: 'Filter ±',
                 filterSignsTooltip: 'Filter solutions with +/- signs',
                 position: 'Position',
+                
+                // Operation Type Translations
+                op_MOVE_1: 'Move 1',
+                op_MOVE_2: 'Move 2',
+                op_REMOVE_1: 'Remove 1',
+                op_REMOVE_2: 'Remove 2',
+                op_ADD_1: 'Add 1',
+                op_ADD_2: 'Add 2',
+                op_MOVE_SUB: 'MoveSub',
+                op_MOVE_ADD: 'MoveAdd',
                 
                 // Footer
                 madeWith: 'Powered by FalkorDB |',

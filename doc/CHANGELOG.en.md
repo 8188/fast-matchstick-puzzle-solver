@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [v0.3] - 2026-02-28
+## [v0.3] - 2026-03-02
 
 ### Added
+- 🧮 **Move-2 Algorithm Enhancement**:
+  - Added REMOVE_2 + ADD_1 + ADD_1 combination: remove 2 matchsticks + add 1 matchstick + add 1 matchstick
 - ✨ **Multi-Database Support**: Added AuraDB (Neo4j) as an optional graph database
   - Implemented database abstraction layer (`IGraphDatabase` interface)
   - Created `FalkorDBAdapter` and `AuraDBAdapter` adapters
@@ -28,12 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 - 🏗️ **Architecture Refactoring**
+  - Refactored `solveMove1` and `solveMove2` functions in `solver.ts`, splitting into smaller functions
+  - Extracted cache building logic into standalone functions `buildMove1Cache` and `buildMove2Cache`
+  - Split various transformation combinations into independent helper functions (e.g., `applyMove1Transforms`, `applyRemove1Add1Combination`, `applyDoubleRemove1Add1`, etc.)
   - Refactored `GraphBuilder` and `MatchstickSolver` to use database adapters instead of direct Redis client
   - Unified database query interface for better maintainability and testability
   - Updated test file `check-graph.ts` to support configurable database selection
 - 📖 **Documentation Updates**
   - Updated README (both Chinese and English) with database selection guide
   - Created `.env.example` template file
+- 🧪 **Test Optimization**
+  - Separated test cases from `test-solver.ts` into standalone `cases.json` file
 
 ### Fixed
 - 🐛 **AuraDB Concurrent Query Issue**

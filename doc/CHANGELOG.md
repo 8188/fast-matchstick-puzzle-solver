@@ -11,9 +11,11 @@
 
 ---
 
-## [v0.3] - 2026-02-28
+## [v0.3] - 2026-03-02
 
 ### 新增
+- 🧮 **移动2根算法增强**：
+  - 新增 REMOVE_2 + ADD_1 + ADD_1 组合：移除两根 + 添加一根 + 添加一根
 - ✨ **多数据库支持**：新增 AuraDB（Neo4j）作为可选图数据库
   - 实现数据库抽象层（`IGraphDatabase` 接口）
   - 创建 `FalkorDBAdapter` 和 `AuraDBAdapter` 适配器
@@ -28,12 +30,17 @@
 
 ### 改进
 - 🏗️ **架构重构**
+  - 重构 `solver.ts` 中的 `solveMove1` 和 `solveMove2` 函数，拆分为多个小函数
+  - 提取缓存构建逻辑到独立函数 `buildMove1Cache` 和 `buildMove2Cache`
+  - 将各种变换组合拆分为独立的辅助函数（如 `applyMove1Transforms`, `applyRemove1Add1Combination`, `applyDoubleRemove1Add1` 等）
   - 将 `GraphBuilder` 和 `MatchstickSolver` 从直接使用 Redis 客户端改为使用数据库适配器
   - 统一数据库查询接口，提高代码可维护性和可测试性
   - 更新测试文件 `check-graph.ts` 支持配置化数据库选择
 - 📖 **文档更新**
   - 更新 README 中英文版，添加数据库选择说明
   - 创建 `.env.example` 模板文件
+- 🧪 **测试优化**
+  - 将测试用例从 `test-solver.ts` 分离到独立的 `cases.json` 文件
 
 ### 修复
 - 🐛 **AuraDB 并发查询问题**
