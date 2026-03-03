@@ -11,36 +11,38 @@
 
 ---
 
+
+
 ## [v0.3] - 2026-03-02
 
 ### 新增
 - 🧮 **移动2根算法增强**：
   - 新增 REMOVE_2 + ADD_1 + ADD_1 组合：移除两根 + 添加一根 + 添加一根
-- ✨ **多数据库支持**：新增 AuraDB（Neo4j）作为可选图数据库
-  - 实现数据库抽象层（`IGraphDatabase` 接口）
-  - 创建 `FalkorDBAdapter` 和 `AuraDBAdapter` 适配器
-  - 支持通过 `.env` 文件配置数据库类型
-- 📝 **环境变量配置**：新增 `.env` 文件支持
-  - 支持 `DB_TYPE`、`GRAPH_NAME`、`PORT` 等配置
-  - FalkorDB 配置：`FALKORDB_URL`
-  - AuraDB 配置：`AURADB_URI`、`AURADB_USERNAME`、`AURADB_PASSWORD`、`AURADB_DATABASE`
+- ✨ **多数据库支持**：支持 FalkorDB、AuraDB（Neo4j）和 RealmDB 三种图存储
+  - 实现统一的 `IGraphDatabase` 抽象
+  - 编写 `FalkorDBAdapter`、`AuraDBAdapter`、`RealmDBAdapter`
+  - 支持通过 `.env` 文件选择数据库并配置连接参数
+- 📝 **环境变量扩展**：
+  - 新增 `DB_TYPE`、`GRAPH_NAME`、`PORT` 等
+  - 添加 `REALMDB_PATH`（默认 `./data/matchstick.realm`）
 - 📦 **新增依赖**
-  - `neo4j-driver`: Neo4j 官方驱动（用于 AuraDB）
-  - `dotenv`: 环境变量加载
+  - `realm`：Realm 本地数据库库（为 RealmDB 提供支持）
+  - 其他新依赖：`neo4j-driver`（AuraDB）和 `dotenv` 之前已添加
 
 ### 改进
-- 🏗️ **架构重构**
-  - 重构 `solver.ts` 中的 `solveMove1` 和 `solveMove2` 函数，拆分为多个小函数
-  - 提取缓存构建逻辑到独立函数 `buildMove1Cache` 和 `buildMove2Cache`
-  - 将各种变换组合拆分为独立的辅助函数（如 `applyMove1Transforms`, `applyRemove1Add1Combination`, `applyDoubleRemove1Add1` 等）
-  - 将 `GraphBuilder` 和 `MatchstickSolver` 从直接使用 Redis 客户端改为使用数据库适配器
-  - 统一数据库查询接口，提高代码可维护性和可测试性
-  - 更新测试文件 `check-graph.ts` 支持配置化数据库选择
+- 🏗️ **配置系统增强**
+  - 更新 `config.ts` 支持 RealmDB 配置加载
+  - 更新 `DatabaseType` 类型定义包含 `'realmdb'`
+  - 完善配置打印功能，显示 RealmDB 路径信息
 - 📖 **文档更新**
-  - 更新 README 中英文版，添加数据库选择说明
-  - 创建 `.env.example` 模板文件
-- 🧪 **测试优化**
-  - 将测试用例从 `test-solver.ts` 分离到独立的 `cases.json` 文件
+  - 更新 README 中英文版，添加 RealmDB 使用说明
+  - 更新 `.env.example` 添加 RealmDB 配置示例
+  - 新增数据库性能对比说明
+- 🎯 **数据库适配器优化**
+  - RealmDB 适配器支持常用 Cypher 查询模式
+  - 自动索引管理（通过 schema 定义）
+
+
 
 ### 修复
 - 🐛 **AuraDB 并发查询问题**
@@ -50,10 +52,6 @@
   - 修复 Neo4j 返回的 Integer 对象（`{low, high}`）未正确转换为 JavaScript number 的问题
   - 添加 `convertNeo4jValue` 方法处理 Neo4j 特殊类型（Integer、Date、DateTime、Point 等）
 
-### 技术细节
-- 数据库适配器统一返回格式：`{ data: any[][], metadata?: any }`
-- 支持参数校验：AuraDB 配置缺失时抛出明确错误
-- 配置打印：启动时显示当前数据库类型和连接信息（隐藏敏感数据）
 
 ---
 

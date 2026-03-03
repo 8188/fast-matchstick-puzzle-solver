@@ -8,13 +8,14 @@
 
 基于**图数据库**的高性能火柴棒等式求解工具，是 [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver) 的升级版。将字符变换规则建模为图，通过 Cypher 查询代替穷举搜索，大幅提升求解效率和可扩展性。
 
-**现已支持双数据库选择：**
+**现已支持三种数据库选择：**
 - **FalkorDB**：轻量级 Redis 图数据库
 - **AuraDB**：Neo4j 云原生图数据库
+- **RealmDB**：本地对象数据库（适合小规模数据）
 
 ## 特性
 
--  🗄️  **双数据库支持**：灵活选择 FalkorDB 或 AuraDB（Neo4j）作为图存储引擎
+-  🗄️  **三数据库支持**：灵活选择 FalkorDB、AuraDB（Neo4j）或 RealmDB 作为存储引擎
 -  🔀  **双模式支持**：标准七段码模式 + 手写模式（`(n)H` 语法）
 -  ✏️  **自定义规则**：支持在线编辑并写回图数据库
 -  🔧  **移动选择**：支持移动 1 根或 2 根火柴
@@ -29,6 +30,7 @@
 - 以下数据库之一：
   - **FalkorDB**（推荐本地开发）
   - **AuraDB**（Neo4j 云服务）
+  - **RealmDB**（本地对象数据库，无需额外安装）
 
 ### 数据库选择
 
@@ -43,6 +45,15 @@ docker run -p 6379:6379 -it --rm falkordb/falkordb:latest
 
 1. 访问 [Neo4j AuraDB](https://neo4j.com/product/aura/) 创建免费实例
 2. 获取连接信息（URI、用户名、密码）
+
+#### 选项 3: 使用 RealmDB（本地）
+
+RealmDB 是一个本地对象数据库，无需额外安装或配置。适合：
+- 快速开发和测试
+- 小规模数据集
+- 不想安装额外数据库服务
+
+**注意**：RealmDB 不是原生图数据库，性能可能不如 FalkorDB/AuraDB，但对于学习和小规模使用已足够。
 
 ### 安装与配置
 
@@ -142,7 +153,7 @@ npm test -- --no-cache
 | 特性 | matchstick-puzzle-solver | matchstick-solver-graph |
 |------|--------------------------|-------------------------|
 | 架构 | 纯前端，规则内存存储 | 前后端分离，图数据库 |
-| 数据库 | 无 | FalkorDB / AuraDB 可选 |
+| 数据库 | 无 | FalkorDB / AuraDB / RealmDB 可选 |
 | 规则存储 | JS 对象 | 图节点/边 |
 | 查询方式 | 穷举 + 剪枝 | Cypher 图查询 |
 | 可扩展性 | 有限 | 高（动态添加规则） |
@@ -152,9 +163,11 @@ npm test -- --no-cache
 
 ### 性能说明
 
-**FalkorDB** 表现最佳，支持真正的并发查询，延迟极低，是本地开发和测试的首选。
-
-**AuraDB** 虽然功能完全相同，但由于 Neo4j 的会话管理限制和网络延迟，查询速度相对 FalkorDB 慢很多。尽管如此，AuraDB 仍比原始的 matchstick-puzzle-solver 版本快很多倍，优势在于可扩展性和云部署的便利性。
+**实际测试数据**（基于32个测试用例）：
+- **RealmDB**: ~550ms - 本地对象数据库访问直接、延迟最低，目前略快于其他选项，适合快速开发和小规模数据。
+- **FalkorDB**: ~600ms - 轻量级 Redis 图数据库，性能仍然优秀，支持真正的并发查询，是负载更高或希望模拟生产环境的首选。
+- **AuraDB**: ~30s - 虽然功能完全相同，但由于 Neo4j 的会话管理限制和网络延迟，查询速度相对较慢，优势在于可扩展性和云部署的便利性
+- **matchstick-puzzle-solver** (原版本): ~125s - 纯前端穷举方案
 
 ##  TODO List
 
@@ -184,5 +197,6 @@ MIT License
 - 图数据库支持：
   - [FalkorDB](https://github.com/FalkorDB/FalkorDB) - Redis 图数据库
   - [Neo4j AuraDB](https://neo4j.com/product/auradb/) - 云原生图数据库
+  - [Realm](https://realm.io/) - 移动优先的本地数据库
 
 ---

@@ -255,6 +255,8 @@ async function main() {
   } finally {
     await builder.disconnect();
   }
+  
+  process.exit(0);
 }
 
 // 如果直接执行则运行

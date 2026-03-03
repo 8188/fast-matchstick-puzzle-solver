@@ -11,7 +11,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+
 ## [v0.3] - 2026-03-02
+
+### Added
+- ✨ **RealmDB Database Support**: Added RealmDB as the third database option
+  - Implemented `RealmDBAdapter` compatible with the unified database interface
+  - RealmDB is a local object database that simulates graph database behavior through an adapter layer
+  - Ideal for rapid development, testing, and small-scale datasets
+  - No additional database service installation required, ready to use out of the box
+- 📝 **Environment Variable Configuration Extension**:
+  - Support for `DB_TYPE=realmdb` configuration
+  - Added `REALMDB_PATH` configuration option (default: `./data/matchstick.realm`)
+- 📦 **New Dependencies**
+  - `realm`: Realm database core library
+
+### Improved
+- 🏗️ **Configuration System Enhancement**
+  - Updated `config.ts` to support RealmDB configuration loading
+  - Updated `DatabaseType` type definition to include `'realmdb'`
+  - Enhanced configuration printing to display RealmDB path information
+- 📖 **Documentation Updates**
+  - Updated README (both Chinese and English) with RealmDB usage guide
+  - Updated `.env.example` with RealmDB configuration examples
+  - Added database performance comparison notes
+- 🎯 **Database Adapter Optimization**
+  - RealmDB adapter supports common Cypher query patterns
+  - Automatic index management (via schema definitions)
+
+### Technical Details
+- RealmDB uses object models (`CharacterNode`, `Relationship`) to store graph data
+- Supported query patterns in the adapter:
+  - Node/relationship creation, deletion, counting
+  - Property-based node queries
+  - Relationship traversal queries
+- Extended database type validation to support three database types
+
+### Performance Notes
+- **FalkorDB**: Best performance, suitable for high-concurrency scenarios
+- **AuraDB**: Cloud deployment, suitable for production environments
+- **RealmDB**: Local lightweight, suitable for development testing and small-scale use
 
 ### Added
 - 🧮 **Move-2 Algorithm Enhancement**:

@@ -1,7 +1,7 @@
 {
   "name": "matchstick-solver-graph",
   "version": "1.0",
-  "description": "High-performance matchstick puzzle solver powered by graph databases (FalkorDB/AuraDB)",
+  "description": "High-performance matchstick puzzle solver powered by graph databases (FalkorDB/AuraDB/RealmDB)",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -13,7 +13,7 @@
     "test": "tsx test/test-solver.ts",
     "check:graph": "tsx test/check-graph.ts"
   },
-  "keywords": ["matchstick", "puzzle", "graph-database", "falkordb", "auradb", "neo4j"],
+  "keywords": ["matchstick", "puzzle", "graph-database", "falkordb", "auradb", "neo4j", "realmdb"],
   "author": "8188",
   "license": "MIT",
   "dependencies": {
@@ -21,6 +21,7 @@
     "cors": "^2.8.5",
     "redis": "^4.6.13",
     "neo4j-driver": "^5.16.0",
+    "realm": "^12.6.0",
     "dotenv": "^16.3.1"
   },
   "devDependencies": {

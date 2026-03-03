@@ -2,6 +2,7 @@ import * as dotenv from 'dotenv';
 import { IGraphDatabase } from './database';
 import { FalkorDBAdapter } from './database/FalkorDBAdapter';
 import { AuraDBAdapter } from './database/AuraDBAdapter';
+import { RealmDBAdapter } from './database/RealmDBAdapter';
 
 // 加载环境变量
 dotenv.config();
@@ -9,7 +10,7 @@ dotenv.config();
 /**
  * 数据库类型
  */
-export type DatabaseType = 'falkordb' | 'auradb';
+export type DatabaseType = 'falkordb' | 'auradb' | 'realmdb';
 
 /**
  * 配置接口
@@ -36,6 +37,11 @@ export interface Config {
     password: string;
     database: string;
   };
+  
+  // RealmDB 配置
+  realmdb?: {
+    path: string;
+  };
 }
 
 /**
@@ -44,8 +50,8 @@ export interface Config {
 export function loadConfig(): Config {
   const dbType = (process.env.DB_TYPE || 'falkordb').toLowerCase() as DatabaseType;
   
-  if (!['falkordb', 'auradb'].includes(dbType)) {
-    throw new Error(`Invalid DB_TYPE: ${dbType}. Must be either 'falkordb' or 'auradb'`);
+  if (!['falkordb', 'auradb', 'realmdb'].includes(dbType)) {
+    throw new Error(`Invalid DB_TYPE: ${dbType}. Must be either 'falkordb', 'auradb', or 'realmdb'`);
   }
 
   const config: Config = {
@@ -78,6 +84,12 @@ export function loadConfig(): Config {
       password,
       database: process.env.AURADB_DATABASE || 'neo4j'
     };
+  } else if (dbType === 'realmdb') {
+    const path = process.env.REALMDB_PATH || './data/matchstick.realm';
+    
+    config.realmdb = {
+      path
+    };
   }
 
   return config;
@@ -104,6 +116,14 @@ export function createDatabaseAdapter(config: Config): IGraphDatabase {
       config.auradb.password,
       config.auradb.database
     );
+  } else if (type === 'realmdb') {
+    if (!config.realmdb) {
+      throw new Error('RealmDB configuration not found');
+    }
+    return new RealmDBAdapter(
+      config.realmdb.path,
+      graphName
+    );
   } else {
     throw new Error(`Unsupported database type: ${type}`);
   }
@@ -125,6 +145,8 @@ export function printConfig(config: Config): void {
     console.log(`   AuraDB Username: ${config.auradb.username}`);
     console.log(`   AuraDB Database: ${config.auradb.database}`);
     console.log(`   AuraDB Password: ${'*'.repeat(config.auradb.password.length)}`);
+  } else if (config.database.type === 'realmdb' && config.realmdb) {
+    console.log(`   RealmDB Path: ${config.realmdb.path}`);
   }
   console.log('');
 }
