@@ -26,7 +26,7 @@ const solver = new MatchstickSolver(provider);
  * 健康检查端点
  */
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', service: 'matchstick-solver-graph' });
+  res.json({ status: 'ok', service: 'fast-matchstick-puzzle-solver' });
 });
 
 /**

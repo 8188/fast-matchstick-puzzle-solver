@@ -6,7 +6,7 @@
 
 ---
 
-A high-performance matchstick equation solver — a faster, backend-enabled cousin of [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver). Character transformation rules are modeled as a graph; Cypher queries and server-side caching are used to accelerate lookups and improve scalability.
+A high-performance matchstick equation solver — a faster, backend-enabled cousin of [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver).
 
 ## Features
 
@@ -48,7 +48,7 @@ Use `DB_TYPE=memory` or omit `DB_TYPE` to run entirely in memory. No external da
 
 ```bash
 git clone <repo-url>
-cd matchstick-solver-graph
+cd fast-matchstick-puzzle-solver
 
 # Install dependencies
 npm install
@@ -79,7 +79,7 @@ Then visit: `http://localhost:3000/index.html`
 ## Project Structure (high level)
 
 ```
-matchstick-solver-graph/
+fast-matchstick-puzzle-solver/
 ├─ backend/       # API server, graph adapters, solver
 ├─ frontend/      # Static UI (index.html, assets, js)
 ├─ test/          # Integration and validation tests
@@ -121,7 +121,7 @@ npm test -- --no-cache
 
 ## Comparison with matchstick-puzzle-solver
 
-| Feature | matchstick-puzzle-solver | matchstick-solver-graph |
+| Feature | matchstick-puzzle-solver | fast-matchstick-puzzle-solver |
 |---------|--------------------------|-------------------------|
 | Architecture | Pure frontend | Frontend/backend, graph-backed service |
 | Database | None (rules in-memory) | Memory / FalkorDB / AuraDB / RealmDB selectable |

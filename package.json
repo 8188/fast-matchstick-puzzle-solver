@@ -1,5 +1,5 @@
 {
-  "name": "matchstick-solver-graph",
+  "name": "fast-matchstick-puzzle-solver",
   "version": "0.4",
   "description": "High-performance matchstick puzzle solver powered by graph databases (FalkorDB/AuraDB/RealmDB)",
   "main": "dist/index.js",

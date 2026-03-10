@@ -6,7 +6,7 @@
 
 ---
 
-一个**高性能**的火柴棒等式求解实现——相比原项目提供了更快速的后端服务与扩展能力。将字符变换规则建模为图，通过 Cypher 查询与服务端缓存来加速变换查找并提升可扩展性。
+一个**高性能**的火柴棒等式求解实现——相比原项目提供了更快速的后端服务与扩展能力。
 
 ## 特性
 
@@ -50,7 +50,7 @@ RealmDB 是一个本地对象数据库，无需额外安装或配置。适合：
 
 ```bash
 git clone <repo-url>
-cd matchstick-solver-graph
+cd fast-matchstick-puzzle-solver
 
 # 安装依赖
 npm install
@@ -81,7 +81,7 @@ npx http-server frontend -p 3000
 ## 项目结构（高层）
 
 ```
-matchstick-solver-graph/
+fast-matchstick-puzzle-solver/
 ├─ backend/       # API 服务、图数据库适配器、求解器实现
 ├─ frontend/      # 静态前端（index.html、资源、脚本）
 ├─ test/          # 集成与校验测试
@@ -123,7 +123,7 @@ npm test -- --no-cache
 
 ## 与 matchstick-puzzle-solver 的对比
 
-| 特性 | matchstick-puzzle-solver | matchstick-solver-graph |
+| 特性 | matchstick-puzzle-solver | fast-matchstick-puzzle-solver |
 |------|--------------------------|-------------------------|
 | 架构 | 纯前端 | 前后端分离，图数据库驱动 |
 | 数据库 | 无（规则内存/本地缓存） | Memory / FalkorDB / AuraDB / RealmDB 可选 |
