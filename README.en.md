@@ -1,4 +1,4 @@
-﻿# Matchstick Equation Solver - Graph Edition 
+﻿# Matchstick Equation Solver - Fast Edition 
 
 [ 中文](./README.md) | [ English](#)
 

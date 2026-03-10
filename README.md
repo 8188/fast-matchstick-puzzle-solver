@@ -1,4 +1,4 @@
-﻿# 火柴棒等式求解器 Graph 版 
+﻿# 火柴棒等式求解器 Fast 版 
 
 [ 中文](#) | [ English](./README.en.md)
 

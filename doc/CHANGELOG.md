@@ -29,6 +29,7 @@
 
 ### 修复
 - 🛠️ **parse-rules.ts 修复**：添加 ESM 主模块检测，`npm run parse-rules` 直接执行，import 时不触发副作用
+- 📦 **仓库重命名**：项目名称从 `matchstick-solver-graph` 改为 `fast-matchstick-puzzle-solver`，更准确反映其高性能特性
 
 ---
 

@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - 🛠️ **parse-rules.ts fix**: Added ESM main-module detection so `npm run parse-rules` executes directly without side effects on import
+- 📦 **Repository renamed**: Project name changed from `matchstick-solver-graph` to `fast-matchstick-puzzle-solver` to better reflect its high-performance characteristics
 
 ---
 
