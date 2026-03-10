@@ -6,7 +6,7 @@
 
 ---
 
-A high-performance matchstick equation solver powered by **graph databases** — a graph-backed implementation related to [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver). Character transformation rules are modeled as a graph; Cypher queries and server-side caching are used to accelerate lookups and improve scalability.
+A high-performance matchstick equation solver — a faster, backend-enabled cousin of [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver). Character transformation rules are modeled as a graph; Cypher queries and server-side caching are used to accelerate lookups and improve scalability.
 
 ## Features
 
