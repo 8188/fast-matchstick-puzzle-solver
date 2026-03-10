@@ -11,7 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.4] - 2026-03-10
 
+### Added
+- 🔬 **Generalized N-match solver**: Introduced a universal transformation combination generator based on a balance model (picked=N, placed=N, delta=0), replacing all specialized implementations
+- 🎛️ **TransformationMetadata module**: Centralized metadata for all transformation operations (MOVE_1/2, ADD_1/2, REMOVE_1/2, MOVE_SUB, MOVE_ADD) with automatic combination derivation for any N
+- 🔢 **moveCount generalization**: Parameter type widened from `1 | 2` to any positive integer, laying the groundwork for future N≥3 support
+- 🚫 **Sub-move solution filtering**: When solving for N moves, solutions reachable in fewer moves are automatically excluded for more precise results
+- 🧪 **Test files added**: Included `test/benchmark.ts` for performance benchmarking and `test/test-generalized-model.ts` for validating the generalized solver
+- 🏗️ **Provider abstraction & memory backend**: Introduced ITransformationProvider interface with GraphTransformationProvider and MemoryTransformationProvider; `DB_TYPE=memory` is now the default
+- ⚡ **Performance & observability enhancements**: Replaced eval with AST interpreter, added search space pruning, state deduplication, and observability metrics (candidatesExplored, pruningHitRate, validationTimeRatio, cacheHitRate, provider)
+
+### Improved
+- 🗜️ **Major code reduction**: solver.ts shrunk from 1868 to ~700 lines (63% reduction) by removing 12 specialized helper methods
+- ♻️ **Combination deduplication**: `generateBalancedCombinations()` treats permutation-equivalent combinations as identical (e.g. ADD_2+REMOVE_2 = REMOVE_2+ADD_2), reducing N=2 combinations from 148 to 9
+- 🧹 **Interface cleanup**: Removed redundant `operation` field from `TransformationMetadata` interface
+
+### Fixed
+- 🛠️ **parse-rules.ts fix**: Added ESM main-module detection so `npm run parse-rules` executes directly without side effects on import
+
+---
 
 ## [v0.3] - 2026-03-02
 
@@ -33,25 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `DatabaseType` type definition to include `'realmdb'`
   - Enhanced configuration printing to display RealmDB path information
 - 📖 **Documentation Updates**
-  - Updated README (both Chinese and English) with RealmDB usage guide
-  - Updated `.env.example` with RealmDB configuration examples
+  - Updated README (both Chinese and English) with database selection guide
+  - Created `.env.example` template file
   - Added database performance comparison notes
 - 🎯 **Database Adapter Optimization**
   - RealmDB adapter supports common Cypher query patterns
   - Automatic index management (via schema definitions)
-
-### Technical Details
-- RealmDB uses object models (`CharacterNode`, `Relationship`) to store graph data
-- Supported query patterns in the adapter:
-  - Node/relationship creation, deletion, counting
-  - Property-based node queries
-  - Relationship traversal queries
-- Extended database type validation to support three database types
-
-### Performance Notes
-- **FalkorDB**: Best performance, suitable for high-concurrency scenarios
-- **AuraDB**: Cloud deployment, suitable for production environments
-- **RealmDB**: Local lightweight, suitable for development testing and small-scale use
 
 ### Added
 - 🧮 **Move-2 Algorithm Enhancement**:
@@ -76,9 +82,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Refactored `GraphBuilder` and `MatchstickSolver` to use database adapters instead of direct Redis client
   - Unified database query interface for better maintainability and testability
   - Updated test file `check-graph.ts` to support configurable database selection
-- 📖 **Documentation Updates**
-  - Updated README (both Chinese and English) with database selection guide
-  - Created `.env.example` template file
 - 🧪 **Test Optimization**
   - Separated test cases from `test-solver.ts` into standalone `cases.json` file
 
@@ -89,11 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 🐛 **Neo4j Integer Type Conversion**
   - Fixed Neo4j Integer objects (`{low, high}`) not being properly converted to JavaScript numbers
   - Added `convertNeo4jValue` method to handle Neo4j special types (Integer, Date, DateTime, Point, etc.)
-
-### Technical Details
-- Database adapters return unified format: `{ data: any[][], metadata?: any }`
-- Configuration validation: Clear error messages when AuraDB config is incomplete
-- Configuration display: Shows current database type and connection info on startup (sensitive data masked)
 
 ---
 

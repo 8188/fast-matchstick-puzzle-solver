@@ -1,6 +1,6 @@
 {
   "name": "matchstick-solver-graph",
-  "version": "1.0",
+  "version": "0.4",
   "description": "High-performance matchstick puzzle solver powered by graph databases (FalkorDB/AuraDB/RealmDB)",
   "main": "dist/index.js",
   "type": "module",
@@ -11,7 +11,9 @@
     "parse-rules": "tsx backend/src/parse-rules.ts",
     "init-graph": "tsx backend/src/graph-builder.ts",
     "test": "tsx test/test-solver.ts",
-    "check:graph": "tsx test/check-graph.ts"
+    "check:graph": "tsx test/check-graph.ts",
+    "benchmark": "tsx test/benchmark.ts",
+    "test:generalized": "tsx test/test-generalized-model.ts"
   },
   "keywords": ["matchstick", "puzzle", "graph-database", "falkordb", "auradb", "neo4j", "realmdb"],
   "author": "8188",

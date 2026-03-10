@@ -1,9 +1,17 @@
-import { IGraphDatabase } from './database';
+﻿import { ITransformationProvider } from './providers/index.js';
+import { ExpressionEvaluator } from './utils/ExpressionEvaluator.js';
+import { 
+  MAX_SUPPORTED_MOVE_COUNT, 
+  isMoveCountSupported,
+  getRecommendedCombinations,
+  TransformationCombination,
+  TRANSFORMATION_METADATA 
+} from './utils/TransformationMetadata.js';
 
 export interface SolveOptions {
   equation: string;
   mode: 'standard' | 'handwritten';
-  moveCount: 1 | 2;
+  moveCount: number;  // 支持任意正整数，当前限制 <= MAX_SUPPORTED_MOVE_COUNT
   maxSolutions?: number;
 }
 
@@ -24,30 +32,42 @@ export interface SolveResult {
   executionTime: number;
   candidatesExplored: number;
   method: string;
+  provider: string;
+  // 性能指标
+  cacheHitRate?: number;  // 缓存命中率
+  validationTimeMs?: number;  // 验证总耗时
+  transformationCacheSize?: number;  // 转换缓存大小
+  validationCacheSize?: number;  // 验证缓存大小
+  uniqueTokensCount?: number;  // 唯一token数量
 }
 
 /**
- * MatchstickSolver — 基于图数据库的火柴棒求解器实现。
- * 提供：字符串分词、图查询（变换）、穷举验证和结果去重；包含本地缓存以提高性能。
+ * MatchstickSolver — 基于变换提供者的火柴棒求解器实现。
+ * 提供：字符串分词、变换查询、穷举验证和结果去重；包含本地缓存以提高性能。
  */
 export class MatchstickSolver {
   private transformationCache = new Map<string, string[]>();
   private validationCache = new Map<string, boolean>();
   
-  constructor(private db: IGraphDatabase) {}
+  // 性能统计
+  private cacheHits = 0;
+  private cacheMisses = 0;
+  private validationTimeMs = 0;
+  
+  constructor(private provider: ITransformationProvider) {}
   
   /**
-   * 连接到数据库
+   * 连接到数据源
    */
   async connect(): Promise<void> {
-    await this.db.connect();
+    await this.provider.connect();
   }
   
   /**
-   * 断开与数据库的连接
+   * 断开连接
    */
   async disconnect(): Promise<void> {
-    await this.db.disconnect();
+    await this.provider.disconnect();
   }
   
   /**
@@ -56,6 +76,9 @@ export class MatchstickSolver {
   clearAllCaches(): void {
     this.transformationCache.clear();
     this.validationCache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.validationTimeMs = 0;
   }
   
   /**
@@ -69,24 +92,29 @@ export class MatchstickSolver {
   }
   
   /**
-   * 内部方法：通过图数据库执行 Cypher 查询
-   */
-  private async query(cypher: string, params: any = {}): Promise<any> {
-    return await this.db.query(cypher, params);
-  }
-  
-  /**
    * 主求解入口
    * 流程：规范化输入 → 生成分词变体 → 使用 MOVE_1 / MOVE_2 策略求解 → 去重/过滤 → 返回结果和统计信息
    */
   async solve(options: SolveOptions): Promise<SolveResult> {
     const startTime = performance.now();
 
+    // 验证 moveCount 参数
+    if (!isMoveCountSupported(options.moveCount)) {
+      throw new Error(
+        `不支持的移动数量: ${options.moveCount}。` +
+        `当前仅支持 1 到 ${MAX_SUPPORTED_MOVE_COUNT} 根火柴的移动。` +
+        `支持 N>=${MAX_SUPPORTED_MOVE_COUNT + 1} 需要扩展规则集与组合模型。`
+      );
+    }
+
     // 将手写标记中的小写 h 归一化为大写 H（例如 "(1)h" -> "(1)H"）
     const equation = (options.equation || '').replace(/(\(\d+\))h/gi, '$1H');
 
-    // 清除上一次求解留下的验证缓存，准备开始本次求解流程
+    // 清除上一次求解留下的验证缓存和统计数据
     this.validationCache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+    this.validationTimeMs = 0;
 
     // 生成分词变体（处理 '11' 的二义性）
     const tokenVariants = this.getAllTokenizeVariants(equation, options.mode);
@@ -96,15 +124,14 @@ export class MatchstickSolver {
     let totalCandidatesExplored = 0;
     
     for (const tokens of tokenVariants) {
-      if (options.moveCount === 1) {
-        const results = await this.solveMove1(tokens, options.mode);
-        allSolutions.push(...results.solutions);
-        totalCandidatesExplored += results.candidatesExplored;
-      } else {
-        const results = await this.solveMove2(tokens, options.mode);
-        allSolutions.push(...results.solutions);
-        totalCandidatesExplored += results.candidatesExplored;
-      }
+      let results;
+      
+      // 根据 moveCount 分发到不同的求解策略
+      // 使用泛化的 solveMoveN 求解任意 N 根火柴
+      results = await this.solveMoveN(tokens, options.mode, options.moveCount);
+      
+      allSolutions.push(...results.solutions);
+      totalCandidatesExplored += results.candidatesExplored;
     }
     
     // 对候选解进行去重
@@ -120,11 +147,27 @@ export class MatchstickSolver {
     
     const executionTime = performance.now() - startTime;
     
+    // 计算缓存命中率
+    const totalCacheAccess = this.cacheHits + this.cacheMisses;
+    const cacheHitRate = totalCacheAccess > 0 ? this.cacheHits / totalCacheAccess : 0;
+    
+    // 统计唯一token数量
+    const uniqueTokens = new Set<string>();
+    for (const tokens of tokenVariants) {
+      tokens.forEach(t => uniqueTokens.add(t));
+    }
+    
     return {
       solutions: limitedSolutions,
       executionTime,
       candidatesExplored: totalCandidatesExplored,
-      method: 'Graph Database Query'
+      method: 'Transformation Provider',
+      provider: this.provider.getProviderName(),
+      cacheHitRate,
+      validationTimeMs: this.validationTimeMs,
+      transformationCacheSize: this.transformationCache.size,
+      validationCacheSize: this.validationCache.size,
+      uniqueTokensCount: uniqueTokens.size
     };
   }
   
@@ -198,1089 +241,278 @@ export class MatchstickSolver {
   }
   
   /**
-   * 处理移动一根火柴的所有变换（包括 MOVE_1、REMOVE_1、ADD_1 等）
+   * 泛化的火柴移动求解器 - 支持移动任意 N 根火柴
+   * 使用收支平衡模型自动生成所有可能的变换组合。
+   * 结果会过滤掉移动少于 N 根即可得到的解（避免与低阶结果重叠）。
    */
-  private async solveMove1(
+  private async solveMoveN(
     tokens: string[],
-    mode: string
+    mode: string,
+    N: number
+  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
+    // 收集 N-1 根可达的解，用于后续过滤
+    let subSolutionEquations = new Set<string>();
+    if (N > 1) {
+      const subResult = await this.solveMoveN(tokens, mode, N - 1);
+      for (const s of subResult.solutions) {
+        subSolutionEquations.add(s.equation.replace(/ /g, ''));
+      }
+    }
+
+    const solutions: Solution[] = [];
+    let candidatesExplored = 0;
+    
+    const combinations = getRecommendedCombinations(N);
+    const transformCache = await this.buildTransformCache(tokens, mode, combinations);
+    
+    for (const combination of combinations) {
+      const combResults = await this.applyCombination(tokens, mode, combination, transformCache);
+      solutions.push(...combResults.solutions);
+      candidatesExplored += combResults.candidatesExplored;
+    }
+    
+    // 过滤掉移动更少根火柴即可得到的等价解
+    const filtered = N > 1
+      ? this.dedup(solutions).filter(s => !subSolutionEquations.has(s.equation.replace(/ /g, '')))
+      : this.dedup(solutions);
+
+    return { solutions: filtered, candidatesExplored };
+  }
+  
+  /**
+   * 为给定的变换组合构建缓存
+   */
+  private async buildTransformCache(
+    tokens: string[],
+    mode: string,
+    combinations: TransformationCombination[]
+  ): Promise<Map<string, Map<string, string[]>>> {
+    const cache = new Map<string, Map<string, string[]>>();
+    const uniqueTokens = [...new Set(tokens), ' '];
+    
+    // 收集所有需要的操作类型
+    const neededOps = new Set<string>();
+    for (const combo of combinations) {
+      for (const op of combo.operations) {
+        neededOps.add(op);
+      }
+    }
+    
+    // 为每个操作类型构建缓存
+    for (const op of neededOps) {
+      const opCache = new Map<string, string[]>();
+      
+      for (const token of uniqueTokens) {
+        const normalizedToken = token === ' ' ? 'SPACE' : token;
+        const targets = await this.getTransformations(normalizedToken, mode, op);
+        opCache.set(token, targets);
+      }
+      
+      cache.set(op, opCache);
+    }
+    
+    return cache;
+  }
+  
+  /**
+   * 应用一个具体的变换组合到等式上
+   */
+  private async applyCombination(
+    tokens: string[],
+    mode: string,
+    combination: TransformationCombination,
+    transformCache: Map<string, Map<string, string[]>>
   ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
     const solutions: Solution[] = [];
     let candidatesExplored = 0;
-
-    // 预取各 token 的变换结果，避免在内层循环中重复查询图数据库
-    const { move1Cache, remove1Cache, add1Cache, spaceAdd1 } = await this.buildMove1Cache(tokens, mode);
     
-    // 1. 处理单个 MOVE_1 变换
-    const move1Result = this.applyMove1Transforms(tokens, move1Cache);
-    solutions.push(...move1Result.solutions);
-    candidatesExplored += move1Result.candidatesExplored;
-    
-    // 2. 处理 REMOVE_1 + ADD_1 组合
-    const removeAddResult = this.applyRemove1Add1Combination(tokens, remove1Cache, add1Cache, spaceAdd1);
-    solutions.push(...removeAddResult.solutions);
-    candidatesExplored += removeAddResult.candidatesExplored;
-    
-    return { solutions: this.dedup(solutions), candidatesExplored };
-  }
-  
-  /**
-   * 构建 MOVE_1 策略所需的缓存
-   */
-  private async buildMove1Cache(tokens: string[], mode: string) {
-    const move1Cache = new Map<string, string[]>();
-    const remove1Cache = new Map<string, string[]>();
-    const add1Cache = new Map<string, string[]>();
-    const uniqueTokens = [...new Set(tokens)];
-    
-    await Promise.all(uniqueTokens.map(async t => {
-      move1Cache.set(t, await this.getTransformations(t, mode, 'MOVE_1'));
-      remove1Cache.set(t, await this.getTransformations(t, mode, 'REMOVE_1'));
-      add1Cache.set(t, await this.getTransformations(t, mode, 'ADD_1'));
-    }));
-    
-    const spaceAdd1 = await this.getTransformations(' ', mode, 'ADD_1');
-    
-    return { move1Cache, remove1Cache, add1Cache, spaceAdd1 };
-  }
-  
-  /**
-   * 应用单个 MOVE_1 变换
-   */
-  private applyMove1Transforms(
-    tokens: string[],
-    move1Cache: Map<string, string[]>
-  ): { solutions: Solution[], candidatesExplored: number } {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      const transformations = move1Cache.get(token)!;
-      
-      for (const target of transformations) {
-        const newTokens = [...tokens];
-        newTokens[i] = target;
-        
+    // 递归应用所有操作
+    const applyOperations = (
+      currentTokens: string[],
+      currentChanges: Change[],
+      operationIndex: number
+    ) => {
+      // 所有操作都已应用完毕
+      if (operationIndex >= combination.operations.length) {
         candidatesExplored++;
         
-        if (this.isValidEquation(newTokens)) {
+        // 清理空格和空字符串
+        const cleaned = currentTokens.filter(t => t !== ' ' && t !== '');
+        
+        // 快速语法检查
+        if (!this.quickSyntaxCheck(cleaned)) return;
+        
+        // 验证是否为合法等式
+        if (this.isValidEquation(cleaned)) {
           solutions.push({
-            equation: newTokens.join(''),
-            changes: [{
-              position: i,
-              from: token,
-              to: target,
-              operation: 'MOVE_1'
-            }]
+            equation: cleaned.join(''),
+            changes: [...currentChanges]
           });
         }
+        return;
       }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用 REMOVE_1 + ADD_1 组合变换
-   */
-  private applyRemove1Add1Combination(
-    tokens: string[],
-    remove1Cache: Map<string, string[]>,
-    add1Cache: Map<string, string[]>,
-    spaceAdd1: string[]
-  ): { solutions: Solution[], candidatesExplored: number } {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let removeIdx = 0; removeIdx < tokens.length; removeIdx++) {
-      const removeToken = tokens[removeIdx];
-      const removals = remove1Cache.get(removeToken)!;
       
-      for (const afterRemove of removals) {
-        // 在现有位置上尝试 ADD_1
-        for (let addIdx = 0; addIdx < tokens.length; addIdx++) {
-          const addToken = tokens[addIdx];
-          const additions = add1Cache.get(addToken)!;
-          
-          for (const afterAdd of additions) {
-            const newTokens = [...tokens];
-            newTokens[removeIdx] = afterRemove;
-            newTokens[addIdx] = afterAdd;
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              solutions.push({
-                equation: cleaned.join(''),
-                changes: [
-                  { position: removeIdx, from: removeToken, to: afterRemove, operation: 'REMOVE_1' },
-                  { position: addIdx, from: addToken, to: afterAdd, operation: 'ADD_1' }
-                ]
-              });
-            }
-          }
-        }
-        
-        // 通过插入位置添加新 token
-        for (const newToken of spaceAdd1) {
-          for (let insertIdx = 0; insertIdx <= tokens.length; insertIdx++) {
-            const newTokens = [...tokens];
-            newTokens[removeIdx] = afterRemove;
-            newTokens.splice(insertIdx, 0, newToken);
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              solutions.push({
-                equation: cleaned.join(''),
-                changes: [
-                  { position: removeIdx, from: removeToken, to: afterRemove, operation: 'REMOVE_1' },
-                  { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_1' }
-                ]
-              });
-            }
-          }
-        }
+      const operation = combination.operations[operationIndex];
+      const opCache = transformCache.get(operation);
+      
+      if (!opCache) {
+        // 未找到该操作的缓存，跳过
+        return;
       }
-    }
+      
+      const metadata = TRANSFORMATION_METADATA[operation];
+      
+      // 根据操作类型选择不同的应用策略
+      if (metadata.picked > 0 && metadata.placed > 0) {
+        // MOVE 类操作（MOVE_1, MOVE_2, MOVE_SUB, MOVE_ADD）
+        this.applyMoveOperation(
+          currentTokens, currentChanges, operationIndex,
+          operation, opCache, applyOperations
+        );
+      } else if (metadata.picked > 0 && metadata.placed === 0) {
+        // REMOVE 类操作（REMOVE_1, REMOVE_2）
+        this.applyRemoveOperation(
+          currentTokens, currentChanges, operationIndex,
+          operation, opCache, applyOperations
+        );
+      } else if (metadata.picked === 0 && metadata.placed > 0) {
+        // ADD 类操作（ADD_1, ADD_2）
+        this.applyAddOperation(
+          currentTokens, currentChanges, operationIndex,
+          operation, opCache, applyOperations
+        );
+      }
+    };
+    
+    // 从第一个操作开始递归应用
+    applyOperations(tokens, [], 0);
     
     return { solutions, candidatesExplored };
   }
   
   /**
-   * 处理移动两根火柴的变换（包括 MOVE_2、REMOVE_2、ADD_2 等组合策略）
+   * 应用 MOVE 类操作（在某个位置替换 token）
    */
-  private async solveMove2(
+  private applyMoveOperation(
     tokens: string[],
-    mode: string
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    // 先收集所有单步（MOVE_1）得到的解，用于后续去重
-    const singleMoveSolutions = await this.solveMove1(tokens, mode);
-    const singleMoveEquations = new Set(singleMoveSolutions.solutions.map(s => s.equation.replace(/ /g, '')));
-
-    // 构建所有需要的缓存
-    const caches = await this.buildMove2Cache(tokens, mode);
-    
-    // 1. 处理单个 MOVE_2 变换
-    const move2Result = this.applyMove2Transforms(tokens, caches.move2Cache, singleMoveEquations);
-    solutions.push(...move2Result.solutions);
-    candidatesExplored += move2Result.candidatesExplored;
-    
-    // 2. 处理 REMOVE_2 + ADD_2 组合
-    const remove2Add2Result = this.applyRemove2Add2Combination(tokens, caches.remove2Cache, caches.add2Cache, caches.spaceAdd2, singleMoveEquations);
-    solutions.push(...remove2Add2Result.solutions);
-    candidatesExplored += remove2Add2Result.candidatesExplored;
-    
-    // 3. 处理两次 MOVE_1 组合
-    const doubleMoveResult = await this.applyDoubleMoveTransforms(tokens, mode, caches.move1Cache, singleMoveEquations);
-    solutions.push(...doubleMoveResult.solutions);
-    candidatesExplored += doubleMoveResult.candidatesExplored;
-    
-    // 4. 处理两次 (REMOVE_1 + ADD_1) 组合
-    const doubleRemoveAddResult = await this.applyDoubleRemove1Add1(tokens, mode, caches.remove1Cache, caches.add1Cache, caches.spaceAdd1, singleMoveEquations);
-    solutions.push(...doubleRemoveAddResult.solutions);
-    candidatesExplored += doubleRemoveAddResult.candidatesExplored;
-    
-    // 5. 处理 MOVE_1 + REMOVE_1 + ADD_1 组合
-    const moveRemoveAddResult = await this.applyMoveRemoveAdd(tokens, mode, caches.move1Cache, caches.remove1Cache, caches.add1Cache, caches.spaceAdd1, singleMoveEquations);
-    solutions.push(...moveRemoveAddResult.solutions);
-    candidatesExplored += moveRemoveAddResult.candidatesExplored;
-    
-    // 6. 处理 MOVE_SUB + ADD_1 组合
-    const moveSubAddResult = await this.applyMoveSubAdd1(tokens, mode, caches.add1Cache, caches.spaceAdd1, singleMoveEquations);
-    solutions.push(...moveSubAddResult.solutions);
-    candidatesExplored += moveSubAddResult.candidatesExplored;
-    
-    // 7. 处理 MOVE_ADD + REMOVE_1 组合
-    const moveAddRemoveResult = await this.applyMoveAddRemove1(tokens, mode, caches.remove1Cache, singleMoveEquations);
-    solutions.push(...moveAddRemoveResult.solutions);
-    candidatesExplored += moveAddRemoveResult.candidatesExplored;
-    
-    // 8. 处理 REMOVE_1 + REMOVE_1 + ADD_2 组合
-    const doubleRemoveAdd2Result = await this.applyRemove1Remove1Add2(tokens, mode, caches.remove1Cache, caches.add2Cache, caches.spaceAdd2, singleMoveEquations);
-    solutions.push(...doubleRemoveAdd2Result.solutions);
-    candidatesExplored += doubleRemoveAdd2Result.candidatesExplored;
-    
-    // 9. 处理 REMOVE_2 + ADD_1 + ADD_1 组合
-    const remove2DoubleAddResult = await this.applyRemove2Add1Add1(tokens, mode, caches.remove2Cache, caches.add1Cache, caches.spaceAdd1, singleMoveEquations);
-    solutions.push(...remove2DoubleAddResult.solutions);
-    candidatesExplored += remove2DoubleAddResult.candidatesExplored;
-    
-    return { solutions: this.dedup(solutions), candidatesExplored };
-  }
-  
-  /**
-   * 构建 MOVE_2 策略所需的缓存
-   */
-  private async buildMove2Cache(tokens: string[], mode: string) {
-    const uniqueTokens = [...new Set(tokens)];
-    const move1Cache = new Map<string, string[]>();
-    const remove1Cache = new Map<string, string[]>();
-    const add1Cache = new Map<string, string[]>();
-    const move2Cache = new Map<string, string[]>();
-    const remove2Cache = new Map<string, string[]>();
-    const add2Cache = new Map<string, string[]>();
-    
-    await Promise.all(uniqueTokens.map(async t => {
-      move1Cache.set(t, await this.getTransformations(t, mode, 'MOVE_1'));
-      remove1Cache.set(t, await this.getTransformations(t, mode, 'REMOVE_1'));
-      add1Cache.set(t, await this.getTransformations(t, mode, 'ADD_1'));
-      move2Cache.set(t, await this.getTransformations(t, mode, 'MOVE_2'));
-      remove2Cache.set(t, await this.getTransformations(t, mode, 'REMOVE_2'));
-      add2Cache.set(t, await this.getTransformations(t, mode, 'ADD_2'));
-    }));
-    
-    const spaceAdd1 = await this.getTransformations(' ', mode, 'ADD_1');
-    const spaceAdd2 = await this.getTransformations(' ', mode, 'ADD_2');
-    
-    return { move1Cache, remove1Cache, add1Cache, move2Cache, remove2Cache, add2Cache, spaceAdd1, spaceAdd2 };
-  }
-  
-  /**
-   * 应用单个 MOVE_2 变换
-   */
-  private applyMove2Transforms(
-    tokens: string[],
-    move2Cache: Map<string, string[]>,
-    singleMoveEquations: Set<string>
-  ): { solutions: Solution[], candidatesExplored: number } {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
+    changes: Change[],
+    operationIndex: number,
+    operation: string,
+    opCache: Map<string, string[]>,
+    applyOperations: (tokens: string[], changes: Change[], index: number) => void
+  ) {
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
-      const transformations = move2Cache.get(token) ?? [];
+      const transformations = opCache.get(token);
+      
+      if (!transformations || transformations.length === 0) continue;
       
       for (const target of transformations) {
         const newTokens = [...tokens];
         newTokens[i] = target;
         
-        candidatesExplored++;
+        const newChanges = [...changes, {
+          position: i,
+          from: token,
+          to: target,
+          operation
+        }];
         
-        if (this.isValidEquation(newTokens)) {
-          const eq = newTokens.join('').replace(/ /g, '');
-          if (!singleMoveEquations.has(eq)) {
-            solutions.push({
-              equation: newTokens.join(''),
-              changes: [{
-                position: i,
-                from: token,
-                to: target,
-                operation: 'MOVE_2'
-              }]
-            });
-          }
-        }
+        applyOperations(newTokens, newChanges, operationIndex + 1);
       }
     }
-    
-    return { solutions, candidatesExplored };
   }
   
   /**
-   * 应用 REMOVE_2 + ADD_2 组合变换
+   * 应用 REMOVE 类操作（移除某个 token 的火柴）
    */
-  private applyRemove2Add2Combination(
+  private applyRemoveOperation(
     tokens: string[],
-    remove2Cache: Map<string, string[]>,
-    add2Cache: Map<string, string[]>,
-    spaceAdd2: string[],
-    singleMoveEquations: Set<string>
-  ): { solutions: Solution[], candidatesExplored: number } {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let removeIdx = 0; removeIdx < tokens.length; removeIdx++) {
-      const removeToken = tokens[removeIdx];
-      const removals = remove2Cache.get(removeToken) ?? [];
-      
-      for (const afterRemove of removals) {
-        // 在已有位置执行添加
-        for (let addIdx = 0; addIdx < tokens.length; addIdx++) {
-          const addToken = tokens[addIdx];
-          const additions = add2Cache.get(addToken) ?? [];
-          
-          for (const afterAdd of additions) {
-            const newTokens = [...tokens];
-            newTokens[removeIdx] = afterRemove;
-            newTokens[addIdx] = afterAdd;
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              const eq = cleaned.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: cleaned.join(''),
-                  changes: [
-                    { position: removeIdx, from: removeToken, to: afterRemove, operation: 'REMOVE_2' },
-                    { position: addIdx, from: addToken, to: afterAdd, operation: 'ADD_2' }
-                  ]
-                });
-              }
-            }
-          }
-        }
-        
-        // 通过插入位置添加
-        for (const newToken of spaceAdd2) {
-          for (let insertIdx = 0; insertIdx <= tokens.length; insertIdx++) {
-            const newTokens = [...tokens];
-            newTokens[removeIdx] = afterRemove;
-            newTokens.splice(insertIdx, 0, newToken);
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              const eq = cleaned.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: cleaned.join(''),
-                  changes: [
-                    { position: removeIdx, from: removeToken, to: afterRemove, operation: 'REMOVE_2' },
-                    { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_2' }
-                  ]
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用两次 MOVE_1 组合
-   */
-  private async applyDoubleMoveTransforms(
-    tokens: string[],
-    mode: string,
-    move1Cache: Map<string, string[]>,
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
+    changes: Change[],
+    operationIndex: number,
+    operation: string,
+    opCache: Map<string, string[]>,
+    applyOperations: (tokens: string[], changes: Change[], index: number) => void
+  ) {
     for (let i = 0; i < tokens.length; i++) {
-      const token1 = tokens[i];
-      const transforms1 = move1Cache.get(token1) ?? [];
+      const token = tokens[i];
+      const transformations = opCache.get(token);
       
-      for (const target1 of transforms1) {
-        const intermediate = [...tokens];
-        intermediate[i] = target1;
+      if (!transformations || transformations.length === 0) continue;
+      
+      for (const target of transformations) {
+        const newTokens = [...tokens];
+        newTokens[i] = target;
         
-        for (let j = 0; j < intermediate.length; j++) {
-          if (i === j) continue;
-          
-          const token2 = intermediate[j];
-          const transforms2 = move1Cache.get(token2) ?? await this.getTransformations(token2, mode, 'MOVE_1');
-          
-          for (const target2 of transforms2) {
-            const newTokens = [...intermediate];
-            newTokens[j] = target2;
-            
-            candidatesExplored++;
-            
-            if (this.isValidEquation(newTokens)) {
-              const eq = newTokens.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: newTokens.join(''),
-                  changes: [
-                    { position: i, from: token1, to: target1, operation: 'MOVE_1' },
-                    { position: j, from: token2, to: target2, operation: 'MOVE_1' }
-                  ]
-                });
-              }
-            }
-          }
-        }
+        const newChanges = [...changes, {
+          position: i,
+          from: token,
+          to: target,
+          operation
+        }];
+        
+        applyOperations(newTokens, newChanges, operationIndex + 1);
       }
     }
-    
-    return { solutions, candidatesExplored };
   }
   
   /**
-   * 应用两次 (REMOVE_1 + ADD_1) 组合变换
+   * 应用 ADD 类操作（在某个 token 上添加火柴，或插入新 token）
    */
-  private async applyDoubleRemove1Add1(
+  private applyAddOperation(
     tokens: string[],
-    mode: string,
-    remove1Cache: Map<string, string[]>,
-    add1Cache: Map<string, string[]>,
-    spaceAdd1: string[],
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
+    changes: Change[],
+    operationIndex: number,
+    operation: string,
+    opCache: Map<string, string[]>,
+    applyOperations: (tokens: string[], changes: Change[], index: number) => void
+  ) {
+    // 策略1: 在现有 token 位置添加火柴
     for (let i = 0; i < tokens.length; i++) {
-      const removals1 = remove1Cache.get(tokens[i]) ?? [];
+      const token = tokens[i];
+      const transformations = opCache.get(token);
       
-      for (const afterRemove1 of removals1) {
-        // 第一次 ADD_1 在现有位置
-        for (let j = 0; j < tokens.length; j++) {
-          if (i === j) continue;
-          
-          const additions1 = add1Cache.get(tokens[j]) ?? [];
-          
-          for (const afterAdd1 of additions1) {
-            const intermediate = [...tokens];
-            intermediate[i] = afterRemove1;
-            intermediate[j] = afterAdd1;
-            
-            // 第二次 REMOVE_1
-            for (let k = 0; k < intermediate.length; k++) {
-              const removals2 = remove1Cache.get(intermediate[k]) ?? await this.getTransformations(intermediate[k], mode, 'REMOVE_1');
-              
-              for (const afterRemove2 of removals2) {
-                // 第二次 ADD_1 在现有位置
-                for (let m = 0; m < intermediate.length; m++) {
-                  if (k === m) continue;
-                  
-                  const additions2 = add1Cache.get(intermediate[m]) ?? await this.getTransformations(intermediate[m], mode, 'ADD_1');
-                  
-                  for (const afterAdd2 of additions2) {
-                    const newTokens = [...intermediate];
-                    newTokens[k] = afterRemove2;
-                    newTokens[m] = afterAdd2;
-                    
-                    candidatesExplored++;
-                    
-                    const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                    
-                    if (this.isValidEquation(cleaned)) {
-                      const eq = cleaned.join('').replace(/ /g, '');
-                      if (!singleMoveEquations.has(eq)) {
-                        solutions.push({
-                          equation: cleaned.join(''),
-                          changes: [
-                            { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                            { position: j, from: tokens[j], to: afterAdd1, operation: 'ADD_1' },
-                            { position: k, from: intermediate[k], to: afterRemove2, operation: 'REMOVE_1' },
-                            { position: m, from: intermediate[m], to: afterAdd2, operation: 'ADD_1' }
-                          ]
-                        });
-                      }
-                    }
-                  }
-                }
-                
-                // 第二次 ADD_1 通过插入
-                for (const newToken of spaceAdd1) {
-                  for (let insertIdx = 0; insertIdx <= intermediate.length; insertIdx++) {
-                    const newTokens = [...intermediate];
-                    newTokens[k] = afterRemove2;
-                    newTokens.splice(insertIdx, 0, newToken);
-                    
-                    candidatesExplored++;
-                    
-                    const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                    
-                    if (this.isValidEquation(cleaned)) {
-                      const eq = cleaned.join('').replace(/ /g, '');
-                      if (!singleMoveEquations.has(eq)) {
-                        solutions.push({
-                          equation: cleaned.join(''),
-                          changes: [
-                            { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                            { position: j, from: tokens[j], to: afterAdd1, operation: 'ADD_1' },
-                            { position: k, from: intermediate[k], to: afterRemove2, operation: 'REMOVE_1' },
-                            { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_1' }
-                          ]
-                        });
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+      if (!transformations || transformations.length === 0) continue;
+      
+      for (const target of transformations) {
+        const newTokens = [...tokens];
+        newTokens[i] = target;
         
-        // 第一次 ADD_1 通过插入位置
-        for (const newToken1 of spaceAdd1) {
-          for (let insertIdx1 = 0; insertIdx1 <= tokens.length; insertIdx1++) {
-            const intermediate = [...tokens];
-            intermediate[i] = afterRemove1;
-            intermediate.splice(insertIdx1, 0, newToken1);
-            
-            // 第二次 REMOVE_1
-            for (let k = 0; k < intermediate.length; k++) {
-              const removals2 = remove1Cache.get(intermediate[k]) ?? await this.getTransformations(intermediate[k], mode, 'REMOVE_1');
-              
-              for (const afterRemove2 of removals2) {
-                // 第二次 ADD_1 在现有位置
-                for (let m = 0; m < intermediate.length; m++) {
-                  if (k === m) continue;
-                  
-                  const additions2 = add1Cache.get(intermediate[m]) ?? await this.getTransformations(intermediate[m], mode, 'ADD_1');
-                  
-                  for (const afterAdd2 of additions2) {
-                    const newTokens = [...intermediate];
-                    newTokens[k] = afterRemove2;
-                    newTokens[m] = afterAdd2;
-                    
-                    candidatesExplored++;
-                    
-                    const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                    
-                    if (this.isValidEquation(cleaned)) {
-                      const eq = cleaned.join('').replace(/ /g, '');
-                      if (!singleMoveEquations.has(eq)) {
-                        solutions.push({
-                          equation: cleaned.join(''),
-                          changes: [
-                            { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                            { position: insertIdx1, from: 'SPACE', to: newToken1, operation: 'ADD_1' },
-                            { position: k, from: intermediate[k], to: afterRemove2, operation: 'REMOVE_1' },
-                            { position: m, from: intermediate[m], to: afterAdd2, operation: 'ADD_1' }
-                          ]
-                        });
-                      }
-                    }
-                  }
-                }
-                
-                // 第二次 ADD_1 通过插入
-                for (const newToken2 of spaceAdd1) {
-                  for (let insertIdx2 = 0; insertIdx2 <= intermediate.length; insertIdx2++) {
-                    const newTokens = [...intermediate];
-                    newTokens[k] = afterRemove2;
-                    newTokens.splice(insertIdx2, 0, newToken2);
-                    
-                    candidatesExplored++;
-                    
-                    const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                    
-                    if (this.isValidEquation(cleaned)) {
-                      const eq = cleaned.join('').replace(/ /g, '');
-                      if (!singleMoveEquations.has(eq)) {
-                        solutions.push({
-                          equation: cleaned.join(''),
-                          changes: [
-                            { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                            { position: insertIdx1, from: 'SPACE', to: newToken1, operation: 'ADD_1' },
-                            { position: k, from: intermediate[k], to: afterRemove2, operation: 'REMOVE_1' },
-                            { position: insertIdx2, from: 'SPACE', to: newToken2, operation: 'ADD_1' }
-                          ]
-                        });
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+        const newChanges = [...changes, {
+          position: i,
+          from: token,
+          to: target,
+          operation
+        }];
+        
+        applyOperations(newTokens, newChanges, operationIndex + 1);
       }
     }
     
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用 MOVE_1 + REMOVE_1 + ADD_1 组合
-   */
-  private async applyMoveRemoveAdd(
-    tokens: string[],
-    mode: string,
-    move1Cache: Map<string, string[]>,
-    remove1Cache: Map<string, string[]>,
-    add1Cache: Map<string, string[]>,
-    spaceAdd1: string[],
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const transforms = move1Cache.get(tokens[i]) ?? [];
-      
-      for (const afterTransform of transforms) {
-        const step1 = [...tokens];
-        step1[i] = afterTransform;
-        
-        for (let j = 0; j < step1.length; j++) {
-          if (i === j) continue;
+    // 策略2: 插入新的 token（从空格添加）
+    const spaceTransformations = opCache.get(' ');
+    if (spaceTransformations && spaceTransformations.length > 0) {
+      for (const newToken of spaceTransformations) {
+        // 在每个可能的位置插入
+        for (let insertIdx = 0; insertIdx <= tokens.length; insertIdx++) {
+          const newTokens = [...tokens];
+          newTokens.splice(insertIdx, 0, newToken);
           
-          const removals = remove1Cache.get(step1[j]) ?? await this.getTransformations(step1[j], mode, 'REMOVE_1');
+          const newChanges = [...changes, {
+            position: insertIdx,
+            from: ' ',
+            to: newToken,
+            operation
+          }];
           
-          for (const afterRemove of removals) {
-            const step2 = [...step1];
-            step2[j] = afterRemove;
-            
-            // ADD_1 在现有位置
-            for (let k = 0; k < step2.length; k++) {
-              if (k === i || k === j) continue;
-              
-              const additions = add1Cache.get(step2[k]) ?? await this.getTransformations(step2[k], mode, 'ADD_1');
-              
-              for (const afterAdd of additions) {
-                const newTokens = [...step2];
-                newTokens[k] = afterAdd;
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterTransform, operation: 'MOVE_1' },
-                        { position: j, from: step1[j], to: afterRemove, operation: 'REMOVE_1' },
-                        { position: k, from: step2[k], to: afterAdd, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-            
-            // ADD_1 通过插入
-            for (const newToken of spaceAdd1) {
-              for (let insertIdx = 0; insertIdx <= step2.length; insertIdx++) {
-                const newTokens = [...step2];
-                newTokens.splice(insertIdx, 0, newToken);
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterTransform, operation: 'MOVE_1' },
-                        { position: j, from: step1[j], to: afterRemove, operation: 'REMOVE_1' },
-                        { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-          }
+          applyOperations(newTokens, newChanges, operationIndex + 1);
         }
       }
     }
-    
-    return { solutions, candidatesExplored };
   }
   
   /**
-   * 应用 MOVE_SUB + ADD_1 组合
-   */
-  private async applyMoveSubAdd1(
-    tokens: string[],
-    mode: string,
-    add1Cache: Map<string, string[]>,
-    spaceAdd1: string[],
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    const uniqueTokens = [...new Set(tokens)];
-    const moveSubCache = new Map<string, string[]>();
-    await Promise.all(uniqueTokens.map(async t => {
-      moveSubCache.set(t, await this.getTransformations(t, mode, 'MOVE_SUB'));
-    }));
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const moveSubTransforms = moveSubCache.get(tokens[i]) ?? [];
-      
-      for (const afterMoveSub of moveSubTransforms) {
-        const step1 = [...tokens];
-        step1[i] = afterMoveSub;
-        
-        // ADD_1 在现有位置
-        for (let j = 0; j < step1.length; j++) {
-          if (i === j) continue;
-          
-          const additions = add1Cache.get(step1[j]) ?? await this.getTransformations(step1[j], mode, 'ADD_1');
-          
-          for (const afterAdd of additions) {
-            const newTokens = [...step1];
-            newTokens[j] = afterAdd;
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              const eq = cleaned.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: cleaned.join(''),
-                  changes: [
-                    { position: i, from: tokens[i], to: afterMoveSub, operation: 'MOVE_SUB' },
-                    { position: j, from: step1[j], to: afterAdd, operation: 'ADD_1' }
-                  ]
-                });
-              }
-            }
-          }
-        }
-        
-        // ADD_1 通过插入
-        for (const newToken of spaceAdd1) {
-          for (let insertIdx = 0; insertIdx <= step1.length; insertIdx++) {
-            const newTokens = [...step1];
-            newTokens.splice(insertIdx, 0, newToken);
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              const eq = cleaned.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: cleaned.join(''),
-                  changes: [
-                    { position: i, from: tokens[i], to: afterMoveSub, operation: 'MOVE_SUB' },
-                    { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_1' }
-                  ]
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用 MOVE_ADD + REMOVE_1 组合
-   */
-  private async applyMoveAddRemove1(
-    tokens: string[],
-    mode: string,
-    remove1Cache: Map<string, string[]>,
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    const uniqueTokens = [...new Set(tokens)];
-    const moveAddCache = new Map<string, string[]>();
-    await Promise.all(uniqueTokens.map(async t => {
-      moveAddCache.set(t, await this.getTransformations(t, mode, 'MOVE_ADD'));
-    }));
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const moveAddTransforms = moveAddCache.get(tokens[i]) ?? [];
-      
-      for (const afterMoveAdd of moveAddTransforms) {
-        const step1 = [...tokens];
-        step1[i] = afterMoveAdd;
-        
-        for (let j = 0; j < step1.length; j++) {
-          if (i === j) continue;
-          
-          const removals = remove1Cache.get(step1[j]) ?? await this.getTransformations(step1[j], mode, 'REMOVE_1');
-          
-          for (const afterRemove of removals) {
-            const newTokens = [...step1];
-            newTokens[j] = afterRemove;
-            
-            candidatesExplored++;
-            
-            const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-            
-            if (this.isValidEquation(cleaned)) {
-              const eq = cleaned.join('').replace(/ /g, '');
-              if (!singleMoveEquations.has(eq)) {
-                solutions.push({
-                  equation: cleaned.join(''),
-                  changes: [
-                    { position: i, from: tokens[i], to: afterMoveAdd, operation: 'MOVE_ADD' },
-                    { position: j, from: step1[j], to: afterRemove, operation: 'REMOVE_1' }
-                  ]
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用 REMOVE_1 + REMOVE_1 + ADD_2 组合
-   */
-  private async applyRemove1Remove1Add2(
-    tokens: string[],
-    mode: string,
-    remove1Cache: Map<string, string[]>,
-    add2Cache: Map<string, string[]>,
-    spaceAdd2: string[],
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const removals1 = remove1Cache.get(tokens[i]) ?? [];
-      
-      for (const afterRemove1 of removals1) {
-        const step1 = [...tokens];
-        step1[i] = afterRemove1;
-        
-        for (let j = 0; j < step1.length; j++) {
-          if (i === j) continue;
-          
-          const removals2 = remove1Cache.get(step1[j]) ?? await this.getTransformations(step1[j], mode, 'REMOVE_1');
-          
-          for (const afterRemove2 of removals2) {
-            const step2 = [...step1];
-            step2[j] = afterRemove2;
-            
-            // ADD_2 在现有位置
-            for (let k = 0; k < step2.length; k++) {
-              if (k === i || k === j) continue;
-              
-              const additions2 = add2Cache.get(step2[k]) ?? await this.getTransformations(step2[k], mode, 'ADD_2');
-              
-              for (const afterAdd2 of additions2) {
-                const newTokens = [...step2];
-                newTokens[k] = afterAdd2;
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                        { position: j, from: step1[j], to: afterRemove2, operation: 'REMOVE_1' },
-                        { position: k, from: step2[k], to: afterAdd2, operation: 'ADD_2' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-            
-            // ADD_2 通过插入
-            for (const newToken of spaceAdd2) {
-              for (let insertIdx = 0; insertIdx <= step2.length; insertIdx++) {
-                const newTokens = [...step2];
-                newTokens.splice(insertIdx, 0, newToken);
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove1, operation: 'REMOVE_1' },
-                        { position: j, from: step1[j], to: afterRemove2, operation: 'REMOVE_1' },
-                        { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_2' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 应用 REMOVE_2 + ADD_1 + ADD_1 组合
-   */
-  private async applyRemove2Add1Add1(
-    tokens: string[],
-    mode: string,
-    remove2Cache: Map<string, string[]>,
-    add1Cache: Map<string, string[]>,
-    spaceAdd1: string[],
-    singleMoveEquations: Set<string>
-  ): Promise<{ solutions: Solution[], candidatesExplored: number }> {
-    const solutions: Solution[] = [];
-    let candidatesExplored = 0;
-    
-    for (let i = 0; i < tokens.length; i++) {
-      const removals2 = remove2Cache.get(tokens[i]) ?? [];
-      
-      for (const afterRemove2 of removals2) {
-        const step1 = [...tokens];
-        step1[i] = afterRemove2;
-        
-        // 第一次 ADD_1 在现有位置
-        for (let j = 0; j < step1.length; j++) {
-          if (i === j) continue;
-          
-          const additions1 = add1Cache.get(step1[j]) ?? await this.getTransformations(step1[j], mode, 'ADD_1');
-          
-          for (const afterAdd1 of additions1) {
-            const step2 = [...step1];
-            step2[j] = afterAdd1;
-            
-            // 第二次 ADD_1 在现有位置
-            for (let k = 0; k < step2.length; k++) {
-              if (k === i || k === j) continue;
-              
-              const additions2 = add1Cache.get(step2[k]) ?? await this.getTransformations(step2[k], mode, 'ADD_1');
-              
-              for (const afterAdd2 of additions2) {
-                const newTokens = [...step2];
-                newTokens[k] = afterAdd2;
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove2, operation: 'REMOVE_2' },
-                        { position: j, from: step1[j], to: afterAdd1, operation: 'ADD_1' },
-                        { position: k, from: step2[k], to: afterAdd2, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-            
-            // 第二次 ADD_1 通过插入
-            for (const newToken of spaceAdd1) {
-              for (let insertIdx = 0; insertIdx <= step2.length; insertIdx++) {
-                const newTokens = [...step2];
-                newTokens.splice(insertIdx, 0, newToken);
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove2, operation: 'REMOVE_2' },
-                        { position: j, from: step1[j], to: afterAdd1, operation: 'ADD_1' },
-                        { position: insertIdx, from: 'SPACE', to: newToken, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-        
-        // 第一次 ADD_1 通过插入
-        for (const newToken1 of spaceAdd1) {
-          for (let insertIdx1 = 0; insertIdx1 <= step1.length; insertIdx1++) {
-            const step2 = [...step1];
-            step2.splice(insertIdx1, 0, newToken1);
-            
-            // 第二次 ADD_1 在现有位置
-            for (let k = 0; k < step2.length; k++) {
-              const additions2 = add1Cache.get(step2[k]) ?? await this.getTransformations(step2[k], mode, 'ADD_1');
-              
-              for (const afterAdd2 of additions2) {
-                const newTokens = [...step2];
-                newTokens[k] = afterAdd2;
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove2, operation: 'REMOVE_2' },
-                        { position: insertIdx1, from: 'SPACE', to: newToken1, operation: 'ADD_1' },
-                        { position: k, from: step2[k], to: afterAdd2, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-            
-            // 第二次 ADD_1 通过插入
-            for (const newToken2 of spaceAdd1) {
-              for (let insertIdx2 = 0; insertIdx2 <= step2.length; insertIdx2++) {
-                const newTokens = [...step2];
-                newTokens.splice(insertIdx2, 0, newToken2);
-                
-                candidatesExplored++;
-                
-                const cleaned = newTokens.filter(t => t !== ' ' && t !== '');
-                
-                if (this.isValidEquation(cleaned)) {
-                  const eq = cleaned.join('').replace(/ /g, '');
-                  if (!singleMoveEquations.has(eq)) {
-                    solutions.push({
-                      equation: cleaned.join(''),
-                      changes: [
-                        { position: i, from: tokens[i], to: afterRemove2, operation: 'REMOVE_2' },
-                        { position: insertIdx1, from: 'SPACE', to: newToken1, operation: 'ADD_1' },
-                        { position: insertIdx2, from: 'SPACE', to: newToken2, operation: 'ADD_1' }
-                      ]
-                    });
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return { solutions, candidatesExplored };
-  }
-  
-  /**
-   * 查询字符在图数据库中，指定关系类型（MOVE_1/ADD_1/REMOVE_1 等）下的所有目标字符
+   * 查询字符的变换结果
    * 返回值已做本地缓存以减少重复查询
    */
   private async getTransformations(
@@ -1290,28 +522,21 @@ export class MatchstickSolver {
   ): Promise<string[]> {
     const cacheKey = `${symbol}:${mode}:${relType}`;
     if (this.transformationCache.has(cacheKey)) {
+      this.cacheHits++;
       return this.transformationCache.get(cacheKey)!;
     }
     
-    // 将真实空格在图数据库中使用 'SPACE' 表示，查询时需做映射
-    const normalizedSymbol = symbol === ' ' ? 'SPACE' : symbol;
-    const escapedSymbol = normalizedSymbol.replace(/'/g, "\\'");
+    this.cacheMisses++;
     
-    const cypher = `
-      MATCH (a:Character {symbol: '${escapedSymbol}', mode: '${mode}'})-[:${relType}]->(b:Character)
-      RETURN b.symbol as target
-    `;
+    // 将真实空格映射为 'SPACE' 字符串
+    const normalizedSymbol = symbol === ' ' ? 'SPACE' : symbol;
     
     try {
-      const result = await this.query(cypher);
-      // 图数据库返回的数据为二维数组（[[val1], [val2], ...]），第一列是 symbol
-      const targets = result.data.map((row: any[]) => {
-        const symbol = row[0];
-        // 将数据库中的 'SPACE' 映射回实际的空格字符
-        return symbol === 'SPACE' ? ' ' : symbol;
-      });
-      this.transformationCache.set(cacheKey, targets);
-      return targets;
+      const targets = await this.provider.getTransformations(normalizedSymbol, mode, relType);
+      // 将数据源中的 'SPACE' 映射回实际的空格字符
+      const denormalized = targets.map(t => t === 'SPACE' ? ' ' : t);
+      this.transformationCache.set(cacheKey, denormalized);
+      return denormalized;
     } catch (error) {
       this.transformationCache.set(cacheKey, []);
       return [];
@@ -1362,7 +587,32 @@ export class MatchstickSolver {
   }
   
   /**
-   * 验证给定 tokens 表示的等式是否为有效的数值等式
+   * 快速语法检查，提前过滤明显无效的等式?
+   * 不进行完整求值，只检查基本语法?
+   */
+  private quickSyntaxCheck(tokens: string[]): boolean {
+    const expr = tokens.join('');
+    
+    // 必须包含等号
+    if (!expr.includes('=')) return false;
+    
+    // 规范化表达式
+    const normalized = expr.replace(/ /g, '');
+    
+    // '=+' '=-' 等特殊模式替换为占位，然后检测连续非法运算符
+    const withoutValidPatterns = normalized.replace(/=[\+\-]/g, '=N');
+    
+    // 若存在连续运算符，则视为非法
+    if (/[\+\-\*\/x=][\+\-\*\/x=]/.test(withoutValidPatterns)) return false;
+    
+    // 检查是否以运算符开头或结尾（除了一元正负号）
+    if (/^[\*\/x=]|[\+\-\*\/x]$/.test(normalized)) return false;
+    
+    return true;
+  }
+
+  /**
+   * 验证给定 tokens 表示的等式是否为有效的数值等�?
    */
   private isValidEquation(tokens: string[]): boolean {
     const expr = tokens.join('');
@@ -1370,12 +620,17 @@ export class MatchstickSolver {
     
     // 缓存命中则直接返回
     if (this.validationCache.has(cacheKey)) {
+      this.cacheHits++;
       return this.validationCache.get(cacheKey)!;
     }
+    
+    this.cacheMisses++;
+    const validationStart = performance.now();
     
     // 不包含等号则不是有效等式
     if (!expr.includes('=')) {
       this.validationCache.set(cacheKey, false);
+      this.validationTimeMs += performance.now() - validationStart;
       return false;
     }
     
@@ -1388,6 +643,7 @@ export class MatchstickSolver {
     // 若存在连续运算符（例如 '++'、'+*' 等），则视为非法表达式
     if (/[\+\-\*\/x=][\+\-\*\/x=]/.test(withoutValidPatterns)) {
       this.validationCache.set(cacheKey, false);
+      this.validationTimeMs += performance.now() - validationStart;
       return false;
     }
     
@@ -1402,19 +658,22 @@ export class MatchstickSolver {
       const parts = evalExpr.split('=');
       if (parts.length !== 2) {
         this.validationCache.set(cacheKey, false);
+        this.validationTimeMs += performance.now() - validationStart;
         return false;
       }
       
-      // 计算左右两侧的数值
-      const left = eval(parts[0]);
-      const right = eval(parts[1]);
+      // 使用自定义解释器计算左右两侧的数值（替代 eval）
+      const left = ExpressionEvaluator.evaluate(parts[0]);
+      const right = ExpressionEvaluator.evaluate(parts[1]);
       
       // 比较左右结果的差值以判断等式是否成立
       const isValid = Math.abs(left - right) < 0.0001;
       this.validationCache.set(cacheKey, isValid);
+      this.validationTimeMs += performance.now() - validationStart;
       return isValid;
     } catch (error) {
       this.validationCache.set(cacheKey, false);
+      this.validationTimeMs += performance.now() - validationStart;
       return false;
     }
   }

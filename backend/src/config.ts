@@ -1,8 +1,9 @@
 import * as dotenv from 'dotenv';
-import { IGraphDatabase } from './database';
-import { FalkorDBAdapter } from './database/FalkorDBAdapter';
-import { AuraDBAdapter } from './database/AuraDBAdapter';
-import { RealmDBAdapter } from './database/RealmDBAdapter';
+import { IGraphDatabase } from './database/index.js';
+import { FalkorDBAdapter } from './database/FalkorDBAdapter.js';
+import { AuraDBAdapter } from './database/AuraDBAdapter.js';
+import { RealmDBAdapter } from './database/RealmDBAdapter.js';
+import { ITransformationProvider, GraphTransformationProvider, MemoryTransformationProvider } from './providers/index.js';
 
 // 加载环境变量
 dotenv.config();
@@ -10,7 +11,7 @@ dotenv.config();
 /**
  * 数据库类型
  */
-export type DatabaseType = 'falkordb' | 'auradb' | 'realmdb';
+export type DatabaseType = 'falkordb' | 'auradb' | 'realmdb' | 'memory';
 
 /**
  * 配置接口
@@ -48,10 +49,10 @@ export interface Config {
  * 从环境变量加载配置
  */
 export function loadConfig(): Config {
-  const dbType = (process.env.DB_TYPE || 'falkordb').toLowerCase() as DatabaseType;
+  const dbType = (process.env.DB_TYPE || 'memory').toLowerCase() as DatabaseType;
   
-  if (!['falkordb', 'auradb', 'realmdb'].includes(dbType)) {
-    throw new Error(`Invalid DB_TYPE: ${dbType}. Must be either 'falkordb', 'auradb', or 'realmdb'`);
+  if (!['falkordb', 'auradb', 'realmdb', 'memory'].includes(dbType)) {
+    throw new Error(`Invalid DB_TYPE: ${dbType}. Must be 'falkordb', 'auradb', 'realmdb', or 'memory'`);
   }
 
   const config: Config = {
@@ -63,7 +64,9 @@ export function loadConfig(): Config {
   };
 
   // 根据数据库类型加载相应配置
-  if (dbType === 'falkordb') {
+  if (dbType === 'memory') {
+    // memory 模式无需额外配置
+  } else if (dbType === 'falkordb') {
     config.falkordb = {
       url: process.env.FALKORDB_URL || 'redis://localhost:6379'
     };
@@ -130,23 +133,43 @@ export function createDatabaseAdapter(config: Config): IGraphDatabase {
 }
 
 /**
+ * 创建变换提供者实例
+ */
+export function createTransformationProvider(config: Config): ITransformationProvider {
+  const { type } = config.database;
+
+  if (type === 'memory') {
+    return new MemoryTransformationProvider();
+  } else {
+    // 对于数据库模式，使用 GraphTransformationProvider
+    const db = createDatabaseAdapter(config);
+    return new GraphTransformationProvider(db);
+  }
+}
+
+/**
  * 打印当前配置信息（隐藏敏感信息）
  */
 export function printConfig(config: Config): void {
   console.log('\n📋 Configuration:');
   console.log(`   Server Port: ${config.port}`);
   console.log(`   Database Type: ${config.database.type.toUpperCase()}`);
-  console.log(`   Graph Name: ${config.database.graphName}`);
   
-  if (config.database.type === 'falkordb' && config.falkordb) {
-    console.log(`   FalkorDB URL: ${config.falkordb.url}`);
-  } else if (config.database.type === 'auradb' && config.auradb) {
-    console.log(`   AuraDB URI: ${config.auradb.uri}`);
-    console.log(`   AuraDB Username: ${config.auradb.username}`);
-    console.log(`   AuraDB Database: ${config.auradb.database}`);
-    console.log(`   AuraDB Password: ${'*'.repeat(config.auradb.password.length)}`);
-  } else if (config.database.type === 'realmdb' && config.realmdb) {
-    console.log(`   RealmDB Path: ${config.realmdb.path}`);
+  if (config.database.type === 'memory') {
+    console.log(`   Provider: MemoryTransformationProvider (no database dependency)`);
+  } else {
+    console.log(`   Graph Name: ${config.database.graphName}`);
+    
+    if (config.database.type === 'falkordb' && config.falkordb) {
+      console.log(`   FalkorDB URL: ${config.falkordb.url}`);
+    } else if (config.database.type === 'auradb' && config.auradb) {
+      console.log(`   AuraDB URI: ${config.auradb.uri}`);
+      console.log(`   AuraDB Username: ${config.auradb.username}`);
+      console.log(`   AuraDB Database: ${config.auradb.database}`);
+      console.log(`   AuraDB Password: ${'*'.repeat(config.auradb.password.length)}`);
+    } else if (config.database.type === 'realmdb' && config.realmdb) {
+      console.log(`   RealmDB Path: ${config.realmdb.path}`);
+    }
   }
   console.log('');
 }

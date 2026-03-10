@@ -159,3 +159,10 @@ export class RuleParser {
     console.log(`   Handwritten mode: ${handwrittenRules.characters.length} characters`);
   }
 }
+
+// 仅当作为主脚本直接运行时才执行解析（npm run parse-rules）
+// import 时不执行，不影响 npm run dev
+import { fileURLToPath } from 'url';
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  RuleParser.parseAllRules();
+}

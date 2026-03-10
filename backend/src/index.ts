@@ -4,7 +4,8 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { MatchstickSolver, type SolveOptions } from './solver.js';
 import { RuleParser, type RuleSet } from './parse-rules.js';
-import { loadConfig, createDatabaseAdapter, printConfig } from './config.js';
+import { loadConfig, createTransformationProvider, printConfig } from './config.js';
+import { isMoveCountSupported, MAX_SUPPORTED_MOVE_COUNT } from './utils/TransformationMetadata.js';
 
 const app = express();
 
@@ -17,9 +18,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('frontend'));
 
-// 创建数据库适配器和求解器
-const db = createDatabaseAdapter(config);
-const solver = new MatchstickSolver(db);
+// 创建变换提供者和求解器
+const provider = createTransformationProvider(config);
+const solver = new MatchstickSolver(provider);
 
 /**
  * 健康检查端点
@@ -46,8 +47,10 @@ app.post('/api/solve', async (req, res) => {
       return res.status(400).json({ error: 'Mode must be "standard" or "handwritten"' });
     }
     
-    if (moveCount !== 1 && moveCount !== 2) {
-      return res.status(400).json({ error: 'moveCount must be 1 or 2' });
+    if (!isMoveCountSupported(moveCount)) {
+      return res.status(400).json({ 
+        error: `不支持的移动数量: ${moveCount}。当前仅支持 1 到 ${MAX_SUPPORTED_MOVE_COUNT} 根火柴的移动。`
+      });
     }
     
     // 求解
@@ -239,9 +242,10 @@ async function startServer() {
     // 打印配置信息
     printConfig(config);
     
-    // 连接到数据库
-    console.log(`🔌 Connecting to ${config.database.type.toUpperCase()}...`);
+    // 连接到数据源
+    console.log(`🔌 Connecting to provider: ${provider.getProviderName()}...`);
     await solver.connect();
+    console.log(`✅ Connected successfully`);
     
     // 启动HTTP服务器
     app.listen(PORT, () => {

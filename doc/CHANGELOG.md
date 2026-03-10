@@ -11,38 +11,76 @@
 
 ---
 
+## [v0.4] - 2026-03-10
+
+### 新增
+- 🔬 **泛化 N 根火柴求解算法**：引入基于收支平衡模型（picked=N, placed=N, delta=0）的通用变换组合生成器，取代原有的特化实现
+- 🎛️ **TransformationMetadata 模块**：集中定义所有变换操作元数据（MOVE_1/2, ADD_1/2, REMOVE_1/2, MOVE_SUB, MOVE_ADD），支持按 N 自动推导合法组合
+- 🔢 **moveCount 泛化**：参数类型从 `1 | 2` 扩展为任意正整数，预留未来支持移动 N≥3 根的能力
+- 🚫 **子移动解过滤**：移动 N 根时自动过滤掉移动少于 N 根即可得到的解，结果更精准
+- 🧪 **新增测试文件**：添加 `test/benchmark.ts` 用于性能基准，`test/test-generalized-model.ts` 用于验证泛化求解器
+- 🏗️ **Provider 抽象与内存后端**：引入 ITransformationProvider 接口，提供 GraphTransformationProvider 和 MemoryTransformationProvider，`DB_TYPE=memory` 为默认配置
+- ⚡ **性能与可观测性优化**：弃用 `eval` 改用 AST 解释器，加入搜索空间剪枝、状态去重，返回观测指标（candidatesExplored、pruningHitRate、validationTimeRatio、cacheHitRate、provider）
+
+### 改进
+- 🗜️ **代码大幅精简**：solver.ts 从 1868 行削减至 ~700 行（减少 63%），删除 12 个特化 helper 方法
+- ♻️ **组合去重**：`generateBalancedCombinations()` 对排列等价的组合去重（如 ADD_2+REMOVE_2 与 REMOVE_2+ADD_2 视为同一组合），N=2 组合数从 148 降至 9
+- 🧹 **接口清理**：移除 `TransformationMetadata` 接口中冗余的 `operation` 字段
+
+### 修复
+- 🛠️ **parse-rules.ts 修复**：添加 ESM 主模块检测，`npm run parse-rules` 直接执行，import 时不触发副作用
+
+---
 
 
 ## [v0.3] - 2026-03-02
 
 ### 新增
+- ✨ **RealmDB 数据库支持**：添加 RealmDB 作为第三种数据库选项
+  - 实现与统一数据库接口兼容的 `RealmDBAdapter`
+  - RealmDB 是一种本地对象数据库，通过适配器层模拟图数据库行为
+  - 适合快速开发、测试和小规模数据集
+  - 无需额外数据库服务安装，开箱即用
+- 📝 **环境变量配置扩展**：
+  - 支持 `DB_TYPE=realmdb` 配置
+  - 添加 `REALMDB_PATH` 配置选项（默认：`./data/matchstick.realm`）
+- 📦 **新增依赖**
+  - `realm`：Realm 数据库核心库
 - 🧮 **移动2根算法增强**：
   - 新增 REMOVE_2 + ADD_1 + ADD_1 组合：移除两根 + 添加一根 + 添加一根
-- ✨ **多数据库支持**：支持 FalkorDB、AuraDB（Neo4j）和 RealmDB 三种图存储
-  - 实现统一的 `IGraphDatabase` 抽象
-  - 编写 `FalkorDBAdapter`、`AuraDBAdapter`、`RealmDBAdapter`
-  - 支持通过 `.env` 文件选择数据库并配置连接参数
-- 📝 **环境变量扩展**：
-  - 新增 `DB_TYPE`、`GRAPH_NAME`、`PORT` 等
-  - 添加 `REALMDB_PATH`（默认 `./data/matchstick.realm`）
+- ✨ **多数据库支持**：添加 AuraDB（Neo4j）作为可选图数据库
+  - 实现数据库抽象层（`IGraphDatabase` 接口）
+  - 创建 `FalkorDBAdapter` 和 `AuraDBAdapter` 适配器
+  - 支持通过 `.env` 文件配置数据库类型
+- 📝 **环境变量配置**：添加 `.env` 文件支持
+  - 支持 `DB_TYPE`、`GRAPH_NAME`、`PORT` 等
+  - FalkorDB 配置：`FALKORDB_URL`
+  - AuraDB 配置：`AURADB_URI`、`AURADB_USERNAME`、`AURADB_PASSWORD`、`AURADB_DATABASE`
 - 📦 **新增依赖**
-  - `realm`：Realm 本地数据库库（为 RealmDB 提供支持）
-  - 其他新依赖：`neo4j-driver`（AuraDB）和 `dotenv` 之前已添加
+  - `neo4j-driver`：官方 Neo4j 驱动（用于 AuraDB）
+  - `dotenv`：环境变量加载器
 
 ### 改进
 - 🏗️ **配置系统增强**
   - 更新 `config.ts` 支持 RealmDB 配置加载
   - 更新 `DatabaseType` 类型定义包含 `'realmdb'`
-  - 完善配置打印功能，显示 RealmDB 路径信息
+  - 增强配置打印功能，显示 RealmDB 路径信息
 - 📖 **文档更新**
-  - 更新 README 中英文版，添加 RealmDB 使用说明
-  - 更新 `.env.example` 添加 RealmDB 配置示例
-  - 新增数据库性能对比说明
+  - 更新 README 中英文版，添加数据库选择指南
+  - 创建 `.env.example` 模板文件
+  - 添加数据库性能对比说明
 - 🎯 **数据库适配器优化**
   - RealmDB 适配器支持常用 Cypher 查询模式
   - 自动索引管理（通过 schema 定义）
-
-
+- 🏗️ **架构重构**
+  - 重构 `solver.ts` 中的 `solveMove1` 和 `solveMove2` 函数，拆分为更小函数
+  - 将缓存构建逻辑提取为独立函数 `buildMove1Cache` 和 `buildMove2Cache`
+  - 将各种变换组合拆分为独立 helper 函数（例如 `applyMove1Transforms`、`applyRemove1Add1Combination`、`applyDoubleRemove1Add1` 等）
+  - 重构 `GraphBuilder` 和 `MatchstickSolver` 使用数据库适配器而非直接 Redis 客户端
+  - 统一数据库查询接口，提高可维护性和可测试性
+  - 更新测试文件 `check-graph.ts` 支持可配置数据库选择
+- 🧪 **测试优化**
+  - 将测试用例从 `test-solver.ts` 分离到独立 `cases.json` 文件
 
 ### 修复
 - 🐛 **AuraDB 并发查询问题**
@@ -51,7 +89,6 @@
 - 🐛 **Neo4j Integer 类型转换**
   - 修复 Neo4j 返回的 Integer 对象（`{low, high}`）未正确转换为 JavaScript number 的问题
   - 添加 `convertNeo4jValue` 方法处理 Neo4j 特殊类型（Integer、Date、DateTime、Point 等）
-
 
 ---
 

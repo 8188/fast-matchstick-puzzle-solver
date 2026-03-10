@@ -2,35 +2,22 @@
 
 [ 中文](./README.md) | [ English](#)
 
-**Version: v0.3**
+**Version: v0.4**
 
 ---
 
 A high-performance matchstick equation solver powered by **graph databases** — a graph-backed implementation related to [matchstick-puzzle-solver](https://github.com/8188/matchstick-puzzle-solver). Character transformation rules are modeled as a graph; Cypher queries and server-side caching are used to accelerate lookups and improve scalability.
 
-**Now supports three database options:**
-- **FalkorDB**: Lightweight Redis-based graph database
-- **AuraDB**: Neo4j cloud-native graph database
-- **RealmDB**: Local object database (suitable for small datasets)
-
 ## Features
 
--  🗄️  **Triple Database Support**: Flexible choice between FalkorDB, AuraDB (Neo4j), or RealmDB as storage engine
+-  🗄️  **Multiple Database Support**: Flexible choice between Memory, FalkorDB, AuraDB (Neo4j), or RealmDB as storage engine
 -  🔀  **Dual Modes**: Standard seven-segment mode + handwritten mode (`(n)H` syntax)
 -  ✏️  **Custom Rules**: Online rule editing with persistence to the graph
--  ↔️  **Move Selection**: Supports solving with 1 or 2 matchstick moves
+-  🔧  **Generalized Move Algorithm**: Balance-model-based solver supporting 1 or 2 matchstick moves
 -  🎨  **SVG Live Preview**: Real-time matchstick equation rendering as you type
 -  ⚙️  **Advanced Syntax**: Supports `=+`, `=-`, leading sign expressions
 
 ## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- One of the following databases:
-  - **FalkorDB** (recommended for local development)
-  - **AuraDB** (Neo4j cloud service)
-  - **RealmDB** (local object database, no additional setup required)
 
 ### Database Selection
 
@@ -54,7 +41,9 @@ RealmDB is a local object database that requires no additional installation or c
 - Avoiding extra database service setup
 
 **Note**: RealmDB is not a native graph database, so performance may be lower than FalkorDB/AuraDB, but it's sufficient for learning and small-scale use.
+#### Option 4: Memory Mode
 
+Use `DB_TYPE=memory` or omit `DB_TYPE` to run entirely in memory. No external database is needed, and startup/response are the fastest, making it the preferred choice for local testing.
 ### Install & Configure
 
 ```bash
@@ -72,6 +61,9 @@ cp .env.example .env
 ### Initialize & Run
 
 ```bash
+# If you edit Markdown rule sources, regenerate JSON and sync graph:
+npm run parse-rules
+
 # Initialize graph data (first time or after rule updates)
 npm run init-graph
 
@@ -132,7 +124,7 @@ npm test -- --no-cache
 | Feature | matchstick-puzzle-solver | matchstick-solver-graph |
 |---------|--------------------------|-------------------------|
 | Architecture | Pure frontend | Frontend/backend, graph-backed service |
-| Database | None (rules in-memory) | FalkorDB / AuraDB / RealmDB selectable |
+| Database | None (rules in-memory) | Memory / FalkorDB / AuraDB / RealmDB selectable |
 | Rule Storage | JS objects / local cache | Graph nodes & edges persisted in DB |
 | Query Method | Brute-force + pruning, with rule cache & generator-based lazy evaluation | Cypher graph queries + server-side cache |
 | Scalability | Good for small-to-medium puzzles with optimized local solver | High — suitable for large rule-sets and dynamic rule updates |
@@ -143,20 +135,17 @@ npm test -- --no-cache
 ### Performance Notes
 
 **Actual Test Results** (based on 32 test cases):
-- **RealmDB**: ~550ms - Slightly faster than the others thanks to direct local object access and no network overhead; ideal for rapid development and small datasets.
-- **FalkorDB**: ~600ms - Lightweight Redis graph database with excellent performance and true concurrent query support, recommended when simulating production or under higher load.
-- **AuraDB**: ~30s - Offers the same functionality but is slower due to Neo4j session management and network latency; the benefit is scalability and easy cloud deployment.
+- **Memory mode**: ~280ms – Entirely in-process execution with zero DB overhead; fastest startup/response for local testing.
+- **RealmDB**: ~450ms - Slightly faster than the others thanks to direct local object access and no network overhead; ideal for rapid development and small datasets.
+- **FalkorDB**: ~550ms - Lightweight Redis graph database with excellent performance and true concurrent query support, recommended when simulating production or under higher load.
+- **AuraDB**: >27s - Offers the same functionality but is slower due to Neo4j session management and network latency; the benefit is scalability and easy cloud deployment.
 
 ##  TODO List
 
-- [ ] **Puzzle Generator**: Automatically generate matchstick puzzles of varying difficulty
-- [ ] **Hint System**: Provide step-by-step hints
-- [ ] **Difficulty Ratings**: Auto-evaluate difficulty based on moves and solution count
-- [ ] **Share Function**: Generate puzzle links for sharing
 - [ ] **Add test cases**: Expand integration and edge-case coverage
-- [ ] **Explore new gameplay**: New puzzle variants and rule-sets
 - [ ] **Polish UI**: Improve visuals and responsiveness
-- [ ] **Consider an App version**: Mobile/desktop packaged release
+- [ ] **Expand architecture for N≥3**: solver already contains generalized model, complete rule set required
+- [ ] **Continue optimizing performance**: improve pruning, caching and concurrency for faster responses
 
 ## Changelog
 
